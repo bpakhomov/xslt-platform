@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class Conversion {
     @Column(name = "id")
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "conversion_time")
@@ -18,7 +19,7 @@ public class Conversion {
     @Column(name = "conversion_datetime")
     private LocalDateTime conversionDateTime;
 
-    @Column(name = "json_value")
+    @Column(name = "json_value", columnDefinition = "TEXT")
     @JsonRawValue
     private String jsonValue;
 
@@ -27,6 +28,17 @@ public class Conversion {
 
     @Column(name = "json_keys_count")
     private int  jsonKeysCount;
+
+    public Conversion() {
+    }
+
+    public Conversion(double conversionTime, LocalDateTime conversionDateTime, String jsonValue, int xmlTagsCount, int jsonKeysCount) {
+        this.conversionTime = conversionTime;
+        this.conversionDateTime = conversionDateTime;
+        this.jsonValue = jsonValue;
+        this.xmlTagsCount = xmlTagsCount;
+        this.jsonKeysCount = jsonKeysCount;
+    }
 
     public void setConversionTime(double conversionTime) {
         this.conversionTime = conversionTime;

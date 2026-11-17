@@ -1,4 +1,4 @@
-package com.example.xsltservice;
+package com.example.xsltservice.config;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.models.Components;
@@ -21,7 +21,7 @@ public class OpenApiConfig {
                 .info(
                         new Info()
                                 .title("XSLT Service")
-                                .version("0.0.1-demo")
+                                .version("0.1.0")
                                 .contact(new Contact().url("https://t.me/syntax3900"))
                 );
     }

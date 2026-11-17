@@ -13,9 +13,21 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/converterdb
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=postgres
+      - XSLTCONVERTER_URL=http://xsltconverter:8081
     depends_on:
       postgres:
         condition: service_healthy
+      xsltconverter:
+        condition: service_started
+    restart: unless-stopped
+
+  xsltconverter:
+    build:
+      context: ./xsltconverter
+      dockerfile: Dockerfile
+    container_name: xsltconverter
+    ports:
+      - "8081:8081"
     restart: unless-stopped
 
   postgres:

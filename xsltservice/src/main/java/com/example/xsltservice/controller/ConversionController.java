@@ -1,0 +1,70 @@
+package com.example.xsltservice.controller;
+
+import com.example.xsltservice.dto.request.ConversionFilterDto;
+import com.example.xsltservice.dto.request.ConversionRequestDto;
+import com.example.xsltservice.dto.response.ConversionResponseDto;
+import com.example.xsltservice.service.ConversionService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.io.IOException;
+import java.util.List;
+
+@RestController
+public class ConversionController {
+
+    private final ConversionService conversionService;
+
+    public ConversionController(ConversionService conversionService) {
+        this.conversionService = conversionService;
+    }
+
+    @GetMapping(value = "/page", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Получить данные об обработанных запросах")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Список конвертаций по фильтру и пагинации"),
+            @ApiResponse(responseCode = "400", description = "Некорректные параметры фильтрации или пагинации")
+    })
+    public ResponseEntity<List<ConversionResponseDto>> getConversions(@ParameterObject ConversionFilterDto filter) {
+        return ResponseEntity.ok(conversionService.getConversions(filter));
+    }
+
+    @PostMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Преобразование XML в JSON, с последующим получением количества xml-тегов, json-ключей, временем обработки и самого json")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "XML успешно сконвертирован и сохранен"),
+            @ApiResponse(responseCode = "400", description = "Пустой или невалидный XML"),
+            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации")
+    })
+    public ResponseEntity<ConversionResponseDto> convertXml(@RequestBody ConversionRequestDto request)
+            throws IOException, InterruptedException {
+        return ResponseEntity.ok(conversionService.convertXml(request));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler({IOException.class, IllegalStateException.class})
+    public ProblemDetail handleConverterFailure(Exception ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(InterruptedException.class)
+    public ProblemDetail handleInterrupted(InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "Request processing was interrupted");
+    }
+}

@@ -1,4 +1,4 @@
-package com.example.xsltservice;
+package com.example.xsltservice.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -52,7 +52,7 @@ public class HibernateConfig {
     public LocalSessionFactoryBean sessionFactory(DataSource dataSource) {
         LocalSessionFactoryBean sessionFactory = new LocalSessionFactoryBean();
         sessionFactory.setDataSource(dataSource);
-        sessionFactory.setPackagesToScan("com.example.demo.entity");
+        sessionFactory.setPackagesToScan("com.example.xsltservice.entity");
 
         Properties properties = new Properties();
         properties.setProperty("hibernate.dialect", hibernateDialect);

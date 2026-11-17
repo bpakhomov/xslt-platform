@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
 @Schema
-public record XmlResponseDto(
+public record ConversionResponseDto(
 
     @Schema Long id,
 
