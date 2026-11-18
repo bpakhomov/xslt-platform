@@ -6,6 +6,7 @@
       <list>
         <option value="$PROJECT_DIR$/xsltservice/pom.xml" />
         <option value="$PROJECT_DIR$/xsltconverter/pom.xml" />
+        <option value="$PROJECT_DIR$/s3service/pom.xml" />
       </list>
     </option>
   </component>

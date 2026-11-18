@@ -1,6 +1,8 @@
 package com.example.xsltservice.controller;
 
 import com.example.xsltservice.dto.request.ConversionRequestDto;
+import com.example.xsltservice.dto.response.ConversionResponseDto;
+import com.example.xsltservice.entity.ConversionType;
 import com.example.xsltservice.service.ConversionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,9 +13,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.NoSuchElementException;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -56,5 +59,31 @@ class ConversionControllerTest {
                         .content("{\"xmlContent\":\"<user/>\"}"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.detail").value("Connection refused"));
+    }
+
+    @Test
+    void returnsConversionByIdAndNotFoundWhenMissing() throws Exception {
+        ConversionResponseDto dto = new ConversionResponseDto(
+                1L,
+                ConversionType.XML_TO_XML,
+                3.5,
+                LocalDateTime.of(2026, 11, 18, 14, 0),
+                "1-source.xml",
+                "1-result.xml",
+                2,
+                1,
+                "<example param1=\"123\"/>"
+        );
+        when(conversionService.getConversion(1L)).thenReturn(dto);
+        when(conversionService.getConversion(999L)).thenThrow(new NoSuchElementException("Conversion not found: 999"));
+
+        mockMvc.perform(get("/request/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.result").value("<example param1=\"123\"/>"));
+
+        mockMvc.perform(get("/request/999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("Conversion not found: 999"));
     }
 }

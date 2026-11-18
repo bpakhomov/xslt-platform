@@ -5,12 +5,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-import org.xml.sax.InputSource;
 import tools.jackson.databind.ObjectMapper;
 
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -32,18 +28,17 @@ public class DomXmlToJsonConverter implements XmlConverter {
     }
 
     @Override
+    public ConversionType getType() {
+        return ConversionType.XML_TO_JSON;
+    }
+
+    @Override
     public String convert(String xmlContent) {
-        if (xmlContent == null || xmlContent.isBlank()) {
-            throw new XmlConversionException("XML content must not be empty");
-        }
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            var builder = factory.newDocumentBuilder();
-            builder.setErrorHandler(null);
-            Element root = builder.parse(new InputSource(new StringReader(xmlContent.trim()))).getDocumentElement();
+            Element root = XmlDocumentParser.parse(xmlContent).getDocumentElement();
             return objectMapper.writeValueAsString(Collections.singletonMap(root.getTagName(), elementToValue(root)));
+        } catch (XmlConversionException e) {
+            throw e;
         } catch (Exception e) {
             throw new XmlConversionException("Failed to convert XML to JSON", e);
         }
@@ -77,10 +72,4 @@ public class DomXmlToJsonConverter implements XmlConverter {
         }
         return result;
     }
-
-    @Override
-    public ConversionType getType() {
-        return ConversionType.XML_TO_JSON;
-    }
-
 }

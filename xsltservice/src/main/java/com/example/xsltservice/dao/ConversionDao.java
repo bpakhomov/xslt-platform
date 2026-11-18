@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public class ConversionDao {
@@ -30,10 +31,13 @@ public class ConversionDao {
         Root<Conversion> root = criteriaQuery.from(Conversion.class);
 
         List<Predicate> predicates = new ArrayList<>();
+        if (filter.conversionType() != null) {
+            predicates.add(criteriaBuilder.equal(root.get("conversionType"), filter.conversionType()));
+        }
         addRange(predicates, criteriaBuilder, root.get("conversionDateTime"), filter.dateFrom(), filter.dateTo());
         addRange(predicates, criteriaBuilder, root.get("conversionTime"), filter.conversionTimeFrom(), filter.conversionTimeTo());
-        addRange(predicates, criteriaBuilder, root.get("xmlTagsCount"), filter.xmlTagsCountFrom(), filter.xmlTagsCountTo());
-        addRange(predicates, criteriaBuilder, root.get("jsonKeysCount"), filter.jsonKeysCountFrom(), filter.jsonKeysCountTo());
+        addRange(predicates, criteriaBuilder, root.get("inputElementsCount"), filter.inputElementsCountFrom(), filter.inputElementsCountTo());
+        addRange(predicates, criteriaBuilder, root.get("outputElementsCount"), filter.outputElementsCountFrom(), filter.outputElementsCountTo());
 
         criteriaQuery.select(root)
                 .where(predicates.toArray(Predicate[]::new))
@@ -46,6 +50,15 @@ public class ConversionDao {
                 .setFirstResult(filter.offset())
                 .setMaxResults(filter.limit())
                 .getResultList();
+    }
+
+    public Optional<Conversion> findById(Long id) {
+        return Optional.ofNullable(sessionFactory.getCurrentSession().find(Conversion.class, id));
+    }
+
+    public Conversion save(Conversion conversion) {
+        sessionFactory.getCurrentSession().persist(conversion);
+        return conversion;
     }
 
     private <T extends Comparable<? super T>> void addRange(
@@ -61,10 +74,5 @@ public class ConversionDao {
         if (to != null) {
             predicates.add(criteriaBuilder.lessThanOrEqualTo(path, to));
         }
-    }
-
-    public Conversion save(Conversion conversion) {
-        sessionFactory.getCurrentSession().persist(conversion);
-        return conversion;
     }
 }

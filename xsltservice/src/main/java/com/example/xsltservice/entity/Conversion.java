@@ -1,6 +1,5 @@
 package com.example.xsltservice.entity;
 
-import com.fasterxml.jackson.annotation.JsonRawValue;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -13,74 +12,106 @@ public class Conversion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "conversion_type")
+    private ConversionType conversionType;
+
     @Column(name = "conversion_time")
     private double conversionTime;
 
     @Column(name = "conversion_datetime")
     private LocalDateTime conversionDateTime;
 
-    @Column(name = "json_value", columnDefinition = "TEXT")
-    @JsonRawValue
-    private String jsonValue;
+    @Column(name = "source_file_key")
+    private String sourceFileKey;
 
-    @Column(name = "xml_tags_count")
-    private int xmlTagsCount;
+    @Column(name = "result_file_key")
+    private String resultFileKey;
 
-    @Column(name = "json_keys_count")
-    private int  jsonKeysCount;
+    @Column(name = "input_elements_count")
+    private Integer inputElementsCount;
+
+    @Column(name = "output_elements_count")
+    private Integer outputElementsCount;
 
     public Conversion() {
     }
 
-    public Conversion(double conversionTime, LocalDateTime conversionDateTime, String jsonValue, int xmlTagsCount, int jsonKeysCount) {
+    public Conversion(
+            ConversionType conversionType,
+            double conversionTime,
+            LocalDateTime conversionDateTime,
+            String sourceFileKey,
+            String resultFileKey,
+            Integer inputElementsCount,
+            Integer outputElementsCount
+    ) {
+        this.conversionType = conversionType;
         this.conversionTime = conversionTime;
         this.conversionDateTime = conversionDateTime;
-        this.jsonValue = jsonValue;
-        this.xmlTagsCount = xmlTagsCount;
-        this.jsonKeysCount = jsonKeysCount;
-    }
-
-    public void setConversionTime(double conversionTime) {
-        this.conversionTime = conversionTime;
-    }
-
-    public void setConversionDateTime(LocalDateTime conversionDateTime) {
-        this.conversionDateTime = conversionDateTime;
-    }
-
-    public void setJsonValue(String jsonValue) {
-        this.jsonValue = jsonValue;
-    }
-
-    public void setXmlTagsCount(int xmlTagsCount) {
-        this.xmlTagsCount = xmlTagsCount;
-    }
-
-    public void setJsonKeysCount(int jsonKeysCount) {
-        this.jsonKeysCount = jsonKeysCount;
+        this.sourceFileKey = sourceFileKey;
+        this.resultFileKey = resultFileKey;
+        this.inputElementsCount = inputElementsCount;
+        this.outputElementsCount = outputElementsCount;
     }
 
     public Long getId() {
         return id;
     }
 
+    public ConversionType getConversionType() {
+        return conversionType;
+    }
+
+    public void setConversionType(ConversionType conversionType) {
+        this.conversionType = conversionType;
+    }
+
     public double getConversionTime() {
         return conversionTime;
+    }
+
+    public void setConversionTime(double conversionTime) {
+        this.conversionTime = conversionTime;
     }
 
     public LocalDateTime getConversionDateTime() {
         return conversionDateTime;
     }
 
-    public String getJsonValue() {
-        return jsonValue;
+    public void setConversionDateTime(LocalDateTime conversionDateTime) {
+        this.conversionDateTime = conversionDateTime;
     }
 
-    public int getXmlTagsCount() {
-        return xmlTagsCount;
+    public String getSourceFileKey() {
+        return sourceFileKey;
     }
 
-    public int getJsonKeysCount() {
-        return jsonKeysCount;
+    public void setSourceFileKey(String sourceFileKey) {
+        this.sourceFileKey = sourceFileKey;
+    }
+
+    public String getResultFileKey() {
+        return resultFileKey;
+    }
+
+    public void setResultFileKey(String resultFileKey) {
+        this.resultFileKey = resultFileKey;
+    }
+
+    public Integer getInputElementsCount() {
+        return inputElementsCount;
+    }
+
+    public void setInputElementsCount(Integer inputElementsCount) {
+        this.inputElementsCount = inputElementsCount;
+    }
+
+    public Integer getOutputElementsCount() {
+        return outputElementsCount;
+    }
+
+    public void setOutputElementsCount(Integer outputElementsCount) {
+        this.outputElementsCount = outputElementsCount;
     }
 }

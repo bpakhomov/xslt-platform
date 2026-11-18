@@ -21,7 +21,7 @@ public class OpenApiConfig {
                 .info(
                         new Info()
                                 .title("XSLT Service")
-                                .version("0.1.0")
+                                .version("0.2.0")
                                 .contact(new Contact().url("https://t.me/syntax3900"))
                 );
     }

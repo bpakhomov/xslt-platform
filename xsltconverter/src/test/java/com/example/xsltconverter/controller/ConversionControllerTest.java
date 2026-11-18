@@ -38,6 +38,19 @@ class ConversionControllerTest {
     }
 
     @Test
+    void convertsXmlWithXsltWhenTypeIsXmlToXml() throws Exception {
+        mockMvc.perform(post("/xml2format")
+                        .param("type", "XML_TO_XML")
+                        .contentType(MediaType.APPLICATION_XML)
+                        .content("<example><param1>123</param1></example>"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .contentTypeCompatibleWith(MediaType.APPLICATION_XML))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.xpath("/example/@param1")
+                        .string("123"));
+    }
+
+    @Test
     void returnsBadRequestOnInvalidXml() throws Exception {
         mockMvc.perform(post("/xml2format")
                 .contentType(MediaType.APPLICATION_XML)

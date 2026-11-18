@@ -14,12 +14,14 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @RestController
 public class ConversionController {
@@ -41,20 +43,37 @@ public class ConversionController {
     }
 
     @PostMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Преобразование XML в JSON, с последующим получением количества xml-тегов, json-ключей, временем обработки и самого json")
+    @Operation(summary = "Преобразование XML в целевой формат с сохранением файлов в S3 и метаданных в БД")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "XML успешно сконвертирован и сохранен"),
             @ApiResponse(responseCode = "400", description = "Пустой или невалидный XML"),
-            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации")
+            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации или S3")
     })
     public ResponseEntity<ConversionResponseDto> convertXml(@RequestBody ConversionRequestDto request)
             throws IOException, InterruptedException {
         return ResponseEntity.ok(conversionService.convertXml(request));
     }
 
+    @GetMapping(value = "/request/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Получить данные конвертации по id вместе с результатом")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Конвертация и ее результат получены"),
+            @ApiResponse(responseCode = "404", description = "Конвертация с указанным id не найдена"),
+            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к S3")
+    })
+    public ResponseEntity<ConversionResponseDto> getConversion(@PathVariable Long id)
+            throws IOException, InterruptedException {
+        return ResponseEntity.ok(conversionService.getConversion(id));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ProblemDetail handleNotFound(NoSuchElementException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
     @ExceptionHandler({IOException.class, IllegalStateException.class})

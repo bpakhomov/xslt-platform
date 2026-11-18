@@ -4,6 +4,7 @@ import com.example.xsltservice.dao.ConversionFilter;
 import com.example.xsltservice.dto.request.ConversionFilterDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
+import com.example.xsltservice.entity.ConversionType;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -14,49 +15,40 @@ public class ConversionMapper {
 
     public ConversionFilter toFilter(ConversionFilterDto dto) {
         if (dto == null) {
-            return new ConversionFilter(20, 0, null, null, null, null, null, null, null, null);
+            return new ConversionFilter(20, 0, null, null, null, null, null, null, null, null, null);
         }
         return new ConversionFilter(
                 dto.limit(),
                 dto.offset(),
+                dto.conversionType(),
                 dto.dateFrom(),
                 dto.dateTo(),
                 dto.conversionTimeFrom(),
                 dto.conversionTimeTo(),
-                dto.xmlTagsCountFrom(),
-                dto.xmlTagsCountTo(),
-                dto.jsonKeysCountFrom(),
-                dto.jsonKeysCountTo()
+                dto.inputElementsCountFrom(),
+                dto.inputElementsCountTo(),
+                dto.outputElementsCountFrom(),
+                dto.outputElementsCountTo()
         );
     }
 
     public Conversion toEntity(
+            ConversionType conversionType,
             double conversionTime,
             LocalDateTime conversionDateTime,
-            String jsonValue,
-            int xmlTagsCount,
-            int jsonKeysCount
+            String sourceFileKey,
+            String resultFileKey,
+            Integer inputElementsCount,
+            Integer outputElementsCount
     ) {
         return new Conversion(
+                conversionType,
                 conversionTime,
                 conversionDateTime,
-                jsonValue,
-                xmlTagsCount,
-                jsonKeysCount
-        );
-    }
-
-    public ConversionResponseDto toResponseDto(Conversion conversion) {
-        if (conversion == null) {
-            return null;
-        }
-        return new ConversionResponseDto(
-                conversion.getId(),
-                conversion.getConversionTime(),
-                conversion.getConversionDateTime(),
-                conversion.getJsonValue(),
-                conversion.getXmlTagsCount(),
-                conversion.getJsonKeysCount()
+                sourceFileKey,
+                resultFileKey,
+                inputElementsCount,
+                outputElementsCount
         );
     }
 
@@ -67,5 +59,26 @@ public class ConversionMapper {
         return conversions.stream()
                 .map(this::toResponseDto)
                 .toList();
+    }
+
+    public ConversionResponseDto toResponseDto(Conversion conversion) {
+        return toResponseDto(conversion, null);
+    }
+
+    public ConversionResponseDto toResponseDto(Conversion conversion, String result) {
+        if (conversion == null) {
+            return null;
+        }
+        return new ConversionResponseDto(
+                conversion.getId(),
+                conversion.getConversionType(),
+                conversion.getConversionTime(),
+                conversion.getConversionDateTime(),
+                conversion.getSourceFileKey(),
+                conversion.getResultFileKey(),
+                conversion.getInputElementsCount(),
+                conversion.getOutputElementsCount(),
+                result
+        );
     }
 }

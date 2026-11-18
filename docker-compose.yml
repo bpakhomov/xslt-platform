@@ -14,10 +14,13 @@ services:
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=postgres
       - XSLTCONVERTER_URL=http://xsltconverter:8081
+      - S3SERVICE_URL=http://s3service:8082
     depends_on:
       postgres:
         condition: service_healthy
       xsltconverter:
+        condition: service_started
+      s3service:
         condition: service_started
     restart: unless-stopped
 
@@ -28,6 +31,36 @@ services:
     container_name: xsltconverter
     ports:
       - "8081:8081"
+    restart: unless-stopped
+
+  s3service:
+    build:
+      context: ./s3service
+      dockerfile: Dockerfile
+    container_name: s3service
+    ports:
+      - "8082:8082"
+    environment:
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=xslt-storage
+    depends_on:
+      - minio
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
     restart: unless-stopped
 
   postgres:
@@ -50,3 +83,5 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:
+
