@@ -30,7 +30,7 @@ class DomXmlToJsonConverterTest {
             </user>
             """;
 
-        JsonNode root = objectMapper.readTree(converter.convertXmlToJson(xml));
+        JsonNode root = objectMapper.readTree(converter.convert(xml));
 
         assertEquals("42", root.path("user").path("id").asString());
         assertEquals("Alice", root.path("user").path("name").asString());
@@ -45,7 +45,7 @@ class DomXmlToJsonConverterTest {
             </catalog>
             """;
 
-        JsonNode books = objectMapper.readTree(converter.convertXmlToJson(xml))
+        JsonNode books = objectMapper.readTree(converter.convert(xml))
             .path("catalog")
             .path("book");
 
@@ -61,7 +61,7 @@ class DomXmlToJsonConverterTest {
             <order id="10"><note>Say "Hi"</note><empty/></order>
             """;
 
-        JsonNode order = objectMapper.readTree(converter.convertXmlToJson(xml)).path("order");
+        JsonNode order = objectMapper.readTree(converter.convert(xml)).path("order");
 
         assertEquals("10", order.path("@id").asString());
         assertEquals("Say \"Hi\"", order.path("note").asString());
@@ -70,14 +70,14 @@ class DomXmlToJsonConverterTest {
 
     @Test
     void convertsEmptyRootToNullValue() {
-        JsonNode root = objectMapper.readTree(converter.convertXmlToJson("<ping/>"));
+        JsonNode root = objectMapper.readTree(converter.convert("<ping/>"));
 
         assertTrue(root.path("ping").isNull());
     }
 
     @Test
     void throwsOnInvalidOrBlankXml() {
-        assertThrows(XmlConversionException.class, () -> converter.convertXmlToJson("<unclosed>"));
-        assertThrows(XmlConversionException.class, () -> converter.convertXmlToJson("   "));
+        assertThrows(XmlConversionException.class, () -> converter.convert("<unclosed>"));
+        assertThrows(XmlConversionException.class, () -> converter.convert("   "));
     }
 }

@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-public class DomXmlToJsonConverter implements XmlToJsonConverter {
+public class DomXmlToJsonConverter implements XmlConverter {
 
     private final ObjectMapper objectMapper;
 
@@ -32,7 +32,7 @@ public class DomXmlToJsonConverter implements XmlToJsonConverter {
     }
 
     @Override
-    public String convertXmlToJson(String xmlContent) {
+    public String convert(String xmlContent) {
         if (xmlContent == null || xmlContent.isBlank()) {
             throw new XmlConversionException("XML content must not be empty");
         }
@@ -77,4 +77,10 @@ public class DomXmlToJsonConverter implements XmlToJsonConverter {
         }
         return result;
     }
+
+    @Override
+    public ConversionType getType() {
+        return ConversionType.XML_TO_JSON;
+    }
+
 }
