@@ -39,15 +39,15 @@ public class ConversionController {
             @ApiResponse(responseCode = "400", description = "Некорректные параметры фильтрации или пагинации")
     })
     public ResponseEntity<List<ConversionResponseDto>> getConversions(@ParameterObject ConversionFilterDto filter) {
-        return ResponseEntity.ok(conversionService.getConversions(filter));
+        return ResponseEntity.ok(conversionService.findByFilter(filter));
     }
 
     @PostMapping(value = "/request", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Преобразование XML в целевой формат с сохранением файлов в S3 и метаданных в БД")
+    @Operation(summary = "Преобразование XML в целевой формат с сохранением результата в БД для последующей миграции в S3")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "XML успешно сконвертирован и сохранен"),
             @ApiResponse(responseCode = "400", description = "Пустой или невалидный XML"),
-            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации или S3")
+            @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации")
     })
     public ResponseEntity<ConversionResponseDto> convertXml(@RequestBody ConversionRequestDto request)
             throws IOException, InterruptedException {

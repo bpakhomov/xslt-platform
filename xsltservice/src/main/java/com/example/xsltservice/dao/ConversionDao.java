@@ -11,6 +11,7 @@ import org.hibernate.SessionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,42 @@ public class ConversionDao {
     @Autowired
     public ConversionDao(SessionFactory sessionFactory) {
         this.sessionFactory = sessionFactory;
+    }
+
+    public List<Conversion> getConversionsForMigration(int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        Session session = sessionFactory.getCurrentSession();
+        return session.createQuery(
+                "from Conversion c where c.sourceFileKey is null " +
+                        "and c.resultFileKey is null " +
+                        "and c.sourceContent is not null and c.resultContent is not null ORDER BY c.id ASC",
+                        Conversion.class)
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
+    public void updateConversionsAfterMigration(List<UploadedConversion> uploadedConversions) {
+        if (uploadedConversions == null || uploadedConversions.isEmpty()) {
+            return;
+        }
+        Session session = sessionFactory.getCurrentSession();
+
+        session.doWork(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "UPDATE conversion SET source_file_key = ?, result_file_key = ?, source_content = NULL, " +
+                            "result_content = NULL WHERE id = ?"
+            )) {
+                for (UploadedConversion conversion : uploadedConversions) {
+                    ps.setString(1, conversion.sourceKey());
+                    ps.setString(2, conversion.resultKey());
+                    ps.setLong(3, conversion.id());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        });
     }
 
     public List<Conversion> findByFilter(ConversionFilter filter) {

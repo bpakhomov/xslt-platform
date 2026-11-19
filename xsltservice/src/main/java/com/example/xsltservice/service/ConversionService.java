@@ -1,17 +1,21 @@
 package com.example.xsltservice.service;
 
 import com.example.xsltservice.dao.ConversionDao;
+import com.example.xsltservice.dao.UploadedConversion;
 import com.example.xsltservice.dto.request.ConversionFilterDto;
 import com.example.xsltservice.dto.request.ConversionRequestDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
 import com.example.xsltservice.entity.ConversionType;
 import com.example.xsltservice.mapper.ConversionMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,35 +33,43 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.UUID;
 
 @Service
 public class ConversionService {
 
+    private static final Logger log = LoggerFactory.getLogger(ConversionService.class);
+
     private final ConversionDao conversionDao;
     private final ConversionMapper conversionMapper;
     private final ConversionMetricsCalculator metricsCalculator;
+    private final TransactionTemplate transactionTemplate;
     private final String xsltconverterUrl;
     private final String s3serviceUrl;
     private final HttpClient httpClient;
+    private final int migrationRowsLimit;
 
     @Autowired
     public ConversionService(
             ConversionDao conversionDao,
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
+            TransactionTemplate transactionTemplate,
             @Value("${xsltconverter.url}") String xsltconverterUrl,
-            @Value("${s3service.url}") String s3serviceUrl
+            @Value("${s3service.url}") String s3serviceUrl,
+            @Value("${migration.rows-limit}") int migrationRowsLimit
     ) {
         this(
                 conversionDao,
                 objectMapper,
                 conversionMapper,
+                transactionTemplate,
                 xsltconverterUrl,
                 s3serviceUrl,
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                migrationRowsLimit
         );
     }
 
@@ -65,20 +77,58 @@ public class ConversionService {
             ConversionDao conversionDao,
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
+            TransactionTemplate transactionTemplate,
             String xsltconverterUrl,
             String s3serviceUrl,
-            HttpClient httpClient
+            HttpClient httpClient,
+            int migrationRowsLimit
     ) {
         this.conversionDao = conversionDao;
         this.metricsCalculator = new ConversionMetricsCalculator(objectMapper);
         this.conversionMapper = conversionMapper;
+        this.transactionTemplate = transactionTemplate;
         this.xsltconverterUrl = stripTrailingSlash(xsltconverterUrl);
         this.s3serviceUrl = stripTrailingSlash(s3serviceUrl);
         this.httpClient = httpClient;
+        this.migrationRowsLimit = migrationRowsLimit;
+    }
+
+    public void migrateConversionsToS3() {
+        List<Conversion> conversions = transactionTemplate.execute(
+                _ -> conversionDao.getConversionsForMigration(migrationRowsLimit)
+        );
+        if (conversions == null || conversions.isEmpty()) {
+            return;
+        }
+
+        List<UploadedConversion> uploadedConversions = new ArrayList<>();
+        for (Conversion conversion : conversions) {
+            String filePrefix = String.valueOf(conversion.getId());
+            String sourceFileKey = filePrefix + "-source.xml";
+            String resultFileKey = filePrefix + "-result" + conversion.getConversionType().getFileExtension();
+
+            try {
+                uploadToS3(sourceFileKey, conversion.getSourceContent(), MediaType.APPLICATION_XML_VALUE);
+                uploadToS3(resultFileKey, conversion.getResultContent(), conversion.getConversionType().getContentType());
+                uploadedConversions.add(new UploadedConversion(conversion.getId(), sourceFileKey, resultFileKey));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Migration to S3 interrupted at conversion id={}", conversion.getId(), e);
+                break;
+            } catch (Exception e) {
+                log.warn("Failed to upload conversion id={} to S3", conversion.getId(), e);
+            }
+        }
+
+        if (!uploadedConversions.isEmpty()) {
+            transactionTemplate.executeWithoutResult(
+                    _ -> conversionDao.updateConversionsAfterMigration(uploadedConversions)
+            );
+        }
     }
 
     @Transactional(readOnly = true)
-    public List<ConversionResponseDto> getConversions(ConversionFilterDto filter) {
+    public List<ConversionResponseDto> findByFilter(ConversionFilterDto filter) {
         if (filter == null) {
             throw new IllegalArgumentException("Filter must not be null");
         }
@@ -94,16 +144,18 @@ public class ConversionService {
         return conversionMapper.toResponseDtoList(conversions);
     }
 
-    @Transactional(readOnly = true)
     public ConversionResponseDto getConversion(Long id) throws IOException, InterruptedException {
-        Conversion conversion = conversionDao.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Conversion not found: " + id));
+        Conversion conversion = transactionTemplate.execute(_ -> conversionDao.findById(id).orElse(null));
+        if (conversion == null) {
+            throw new NoSuchElementException("Conversion not found: " + id);
+        }
         String resultKey = conversion.getResultFileKey();
-        String result = (resultKey != null && !resultKey.isBlank()) ? downloadFromS3(resultKey) : null;
+        String result = (resultKey != null && !resultKey.isBlank())
+                ? downloadFromS3(resultKey)
+                : conversion.getResultContent();
         return conversionMapper.toResponseDto(conversion, result);
     }
 
-    @Transactional
     public ConversionResponseDto convertXml(ConversionRequestDto request) throws IOException, InterruptedException {
         if (request == null) {
             throw new IllegalArgumentException("Request must not be null");
@@ -118,23 +170,18 @@ public class ConversionService {
 
         int outputElementsCount = countOutputElements(conversionType, resultContent);
 
-        String filePrefix = UUID.randomUUID().toString();
-        String sourceFileKey = filePrefix + "-source.xml";
-        String resultFileKey = filePrefix + "-result" + conversionType.getFileExtension();
-
-        uploadToS3(sourceFileKey, xmlContent, MediaType.APPLICATION_XML_VALUE);
-        uploadToS3(resultFileKey, resultContent, conversionType.getContentType());
-
         Conversion conversion = conversionMapper.toEntity(
                 conversionType,
                 duration,
                 LocalDateTime.now(),
-                sourceFileKey,
-                resultFileKey,
+                null,
+                null,
                 inputElementsCount,
-                outputElementsCount
+                outputElementsCount,
+                xmlContent,
+                resultContent
         );
-        Conversion saved = conversionDao.save(conversion);
+        Conversion saved = transactionTemplate.execute(_ -> conversionDao.save(conversion));
 
         return conversionMapper.toResponseDto(saved, resultContent);
     }

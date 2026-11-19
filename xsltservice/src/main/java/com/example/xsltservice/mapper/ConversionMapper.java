@@ -39,7 +39,9 @@ public class ConversionMapper {
             String sourceFileKey,
             String resultFileKey,
             Integer inputElementsCount,
-            Integer outputElementsCount
+            Integer outputElementsCount,
+            String sourceContent,
+            String resultContent
     ) {
         return new Conversion(
                 conversionType,
@@ -48,7 +50,9 @@ public class ConversionMapper {
                 sourceFileKey,
                 resultFileKey,
                 inputElementsCount,
-                outputElementsCount
+                outputElementsCount,
+                sourceContent,
+                resultContent
         );
     }
 

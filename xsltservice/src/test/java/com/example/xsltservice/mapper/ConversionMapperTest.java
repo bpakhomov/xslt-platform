@@ -56,7 +56,9 @@ class ConversionMapperTest {
                 "src.xml",
                 "res.xml",
                 5,
-                2
+                2,
+                null,
+                null
         );
 
         assertEquals(ConversionType.XML_TO_XML, conversion.getConversionType());
@@ -66,6 +68,24 @@ class ConversionMapperTest {
         assertEquals("res.xml", conversion.getResultFileKey());
         assertEquals(5, conversion.getInputElementsCount());
         assertEquals(2, conversion.getOutputElementsCount());
+        assertNull(conversion.getSourceContent());
+        assertNull(conversion.getResultContent());
+
+        Conversion pending = mapper.toEntity(
+                ConversionType.XML_TO_JSON,
+                8.0,
+                now,
+                null,
+                null,
+                3,
+                2,
+                "<a/>",
+                "{\"a\":null}"
+        );
+        assertNull(pending.getSourceFileKey());
+        assertNull(pending.getResultFileKey());
+        assertEquals("<a/>", pending.getSourceContent());
+        assertEquals("{\"a\":null}", pending.getResultContent());
     }
 
     @Test

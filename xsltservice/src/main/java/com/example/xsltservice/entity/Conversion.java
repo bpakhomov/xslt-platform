@@ -34,6 +34,12 @@ public class Conversion {
     @Column(name = "output_elements_count")
     private Integer outputElementsCount;
 
+    @Column(name = "source_content", columnDefinition = "TEXT")
+    private String sourceContent;
+
+    @Column(name = "result_content", columnDefinition = "TEXT")
+    private String resultContent;
+
     public Conversion() {
     }
 
@@ -46,6 +52,30 @@ public class Conversion {
             Integer inputElementsCount,
             Integer outputElementsCount
     ) {
+        this(
+                conversionType,
+                conversionTime,
+                conversionDateTime,
+                sourceFileKey,
+                resultFileKey,
+                inputElementsCount,
+                outputElementsCount,
+                null,
+                null
+        );
+    }
+
+    public Conversion(
+            ConversionType conversionType,
+            double conversionTime,
+            LocalDateTime conversionDateTime,
+            String sourceFileKey,
+            String resultFileKey,
+            Integer inputElementsCount,
+            Integer outputElementsCount,
+            String sourceContent,
+            String resultContent
+    ) {
         this.conversionType = conversionType;
         this.conversionTime = conversionTime;
         this.conversionDateTime = conversionDateTime;
@@ -53,6 +83,8 @@ public class Conversion {
         this.resultFileKey = resultFileKey;
         this.inputElementsCount = inputElementsCount;
         this.outputElementsCount = outputElementsCount;
+        this.sourceContent = sourceContent;
+        this.resultContent = resultContent;
     }
 
     public Long getId() {
@@ -113,5 +145,21 @@ public class Conversion {
 
     public void setOutputElementsCount(Integer outputElementsCount) {
         this.outputElementsCount = outputElementsCount;
+    }
+
+    public String getSourceContent() {
+        return sourceContent;
+    }
+
+    public void setSourceContent(String sourceContent) {
+        this.sourceContent = sourceContent;
+    }
+
+    public String getResultContent() {
+        return resultContent;
+    }
+
+    public void setResultContent(String resultContent) {
+        this.resultContent = resultContent;
     }
 }
