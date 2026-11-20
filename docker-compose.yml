@@ -17,6 +17,10 @@ services:
       - S3SERVICE_URL=http://s3service:8082
       - MIGRATION_DELAY_MS=60000
       - MIGRATION_ROWS_LIMIT=100
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_TTL_MINUTES=10
+      - CACHE_COMPRESS_THRESHOLD_BYTES=4096
     depends_on:
       postgres:
         condition: service_healthy
@@ -24,6 +28,8 @@ services:
         condition: service_started
       s3service:
         condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   xsltconverter:
@@ -33,6 +39,14 @@ services:
     container_name: xsltconverter
     ports:
       - "8081:8081"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_TTL_MINUTES=10
+      - CACHE_COMPRESS_THRESHOLD_BYTES=4096
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   s3service:
@@ -80,6 +94,19 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d converterdb"]
       interval: 5s
       timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 5
     restart: unless-stopped
 

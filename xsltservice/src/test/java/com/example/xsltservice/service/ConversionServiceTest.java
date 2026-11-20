@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -187,6 +188,41 @@ class ConversionServiceTest {
         }
     }
 
+    @Test
+    void returnsCachedConversionWithoutCallingConverterOrDb() throws Exception {
+        ConversionDao dao = mock(ConversionDao.class);
+        ConversionCache cache = mock(ConversionCache.class);
+        ConversionResponseDto cachedDto = new ConversionResponseDto(
+                5L,
+                ConversionType.XML_TO_JSON,
+                1.2,
+                LocalDateTime.of(2026, 11, 20, 10, 0),
+                null,
+                null,
+                1,
+                1,
+                "{\"a\":null}"
+        );
+        when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of(cachedDto));
+
+        ConversionService service = new ConversionService(
+                dao,
+                new ObjectMapper(),
+                new ConversionMapper(),
+                new TransactionTemplate(mock(PlatformTransactionManager.class)),
+                cache,
+                "http://localhost:8081",
+                "http://localhost:8082",
+                HttpClient.newHttpClient(),
+                100
+        );
+
+        ConversionResponseDto result = service.convertXml(new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON));
+
+        assertEquals(cachedDto, result);
+        verify(dao, never()).save(any());
+    }
+
     private ConversionDao mockDao() {
         ConversionDao dao = mock(ConversionDao.class);
         when(dao.save(any(Conversion.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -197,11 +233,14 @@ class ConversionServiceTest {
         String converterUrl = converterServer != null
                 ? "http://localhost:" + converterServer.getAddress().getPort()
                 : "http://localhost:8081";
+        ConversionCache cache = mock(ConversionCache.class);
+        when(cache.get(any(), any())).thenReturn(Optional.empty());
         return new ConversionService(
                 dao,
                 new ObjectMapper(),
                 new ConversionMapper(),
                 new TransactionTemplate(mock(PlatformTransactionManager.class)),
+                cache,
                 converterUrl,
                 "http://localhost:" + s3Server.getAddress().getPort(),
                 HttpClient.newHttpClient(),

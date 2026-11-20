@@ -36,6 +36,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 @Service
 public class ConversionService {
@@ -46,6 +47,7 @@ public class ConversionService {
     private final ConversionMapper conversionMapper;
     private final ConversionMetricsCalculator metricsCalculator;
     private final TransactionTemplate transactionTemplate;
+    private final ConversionCache conversionCache;
     private final String xsltconverterUrl;
     private final String s3serviceUrl;
     private final HttpClient httpClient;
@@ -57,6 +59,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
+            ConversionCache conversionCache,
             @Value("${xsltconverter.url}") String xsltconverterUrl,
             @Value("${s3service.url}") String s3serviceUrl,
             @Value("${migration.rows-limit}") int migrationRowsLimit
@@ -66,6 +69,7 @@ public class ConversionService {
                 objectMapper,
                 conversionMapper,
                 transactionTemplate,
+                conversionCache,
                 xsltconverterUrl,
                 s3serviceUrl,
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
@@ -78,6 +82,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
+            ConversionCache conversionCache,
             String xsltconverterUrl,
             String s3serviceUrl,
             HttpClient httpClient,
@@ -87,6 +92,7 @@ public class ConversionService {
         this.metricsCalculator = new ConversionMetricsCalculator(objectMapper);
         this.conversionMapper = conversionMapper;
         this.transactionTemplate = transactionTemplate;
+        this.conversionCache = conversionCache;
         this.xsltconverterUrl = stripTrailingSlash(xsltconverterUrl);
         this.s3serviceUrl = stripTrailingSlash(s3serviceUrl);
         this.httpClient = httpClient;
@@ -161,7 +167,15 @@ public class ConversionService {
             throw new IllegalArgumentException("Request must not be null");
         }
         String xmlContent = request.xmlContent();
+        if (xmlContent == null || xmlContent.isBlank()) {
+            throw new IllegalArgumentException("XML content must not be empty");
+        }
         ConversionType conversionType = request.conversionType();
+        Optional<ConversionResponseDto> cached = conversionCache.get(xmlContent, conversionType);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         int inputElementsCount = metricsCalculator.countXmlTags(xmlContent);
 
         long start = System.nanoTime();
@@ -183,7 +197,9 @@ public class ConversionService {
         );
         Conversion saved = transactionTemplate.execute(_ -> conversionDao.save(conversion));
 
-        return conversionMapper.toResponseDto(saved, resultContent);
+        ConversionResponseDto response = conversionMapper.toResponseDto(saved, resultContent);
+        conversionCache.put(xmlContent, conversionType, response);
+        return response;
     }
 
     private <T extends Comparable<? super T>> boolean isInvalidRange(T from, T to) {
