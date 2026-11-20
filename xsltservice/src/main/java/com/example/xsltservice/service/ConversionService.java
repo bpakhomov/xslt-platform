@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -37,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 public class ConversionService {
@@ -133,7 +133,6 @@ public class ConversionService {
         }
     }
 
-    @Transactional(readOnly = true)
     public List<ConversionResponseDto> findByFilter(ConversionFilterDto filter) {
         if (filter == null) {
             throw new IllegalArgumentException("Filter must not be null");
@@ -146,8 +145,19 @@ public class ConversionService {
             throw new IllegalArgumentException("Uncorrected request params");
         }
 
-        List<Conversion> conversions = conversionDao.findByFilter(conversionMapper.toFilter(filter));
-        return conversionMapper.toResponseDtoList(conversions);
+        List<Conversion> conversions = transactionTemplate.execute(
+                _ -> conversionDao.findByFilter(conversionMapper.toFilter(filter))
+        );
+        if (conversions == null || conversions.isEmpty()) {
+            return List.of();
+        }
+
+        List<CompletableFuture<ConversionResponseDto>> futures = conversions.stream()
+                .map(this::enrichAsync)
+                .toList();
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .toList();
     }
 
     public ConversionResponseDto getConversion(Long id) throws IOException, InterruptedException {
@@ -155,11 +165,7 @@ public class ConversionService {
         if (conversion == null) {
             throw new NoSuchElementException("Conversion not found: " + id);
         }
-        String resultKey = conversion.getResultFileKey();
-        String result = (resultKey != null && !resultKey.isBlank())
-                ? downloadFromS3(resultKey)
-                : conversion.getResultContent();
-        return conversionMapper.toResponseDto(conversion, result);
+        return conversionMapper.toResponseDto(conversion, resolveResult(conversion));
     }
 
     public ConversionResponseDto convertXml(ConversionRequestDto request) throws IOException, InterruptedException {
@@ -167,7 +173,7 @@ public class ConversionService {
             throw new IllegalArgumentException("Request must not be null");
         }
         String xmlContent = request.xmlContent();
-        if (xmlContent == null || xmlContent.isBlank()) {
+        if (!hasText(xmlContent)) {
             throw new IllegalArgumentException("XML content must not be empty");
         }
         ConversionType conversionType = request.conversionType();
@@ -199,11 +205,56 @@ public class ConversionService {
 
         ConversionResponseDto response = conversionMapper.toResponseDto(saved, resultContent);
         conversionCache.put(xmlContent, conversionType, response);
+        if (saved != null) {
+            conversionCache.putResult(saved.getId(), resultContent);
+        }
         return response;
     }
 
     private <T extends Comparable<? super T>> boolean isInvalidRange(T from, T to) {
         return from != null && to != null && from.compareTo(to) > 0;
+    }
+
+    private CompletableFuture<ConversionResponseDto> enrichAsync(Conversion conversion) {
+        if (hasText(conversion.getResultContent())) {
+            return CompletableFuture.completedFuture(
+                    conversionMapper.toResponseDto(conversion, conversion.getResultContent())
+            );
+        }
+        String resultKey = conversion.getResultFileKey();
+        if (!hasText(resultKey)) {
+            return CompletableFuture.completedFuture(conversionMapper.toResponseDto(conversion, null));
+        }
+        Optional<String> cached = conversionCache.getResult(conversion.getId());
+        if (cached.isPresent()) {
+            return CompletableFuture.completedFuture(conversionMapper.toResponseDto(conversion, cached.get()));
+        }
+        return downloadFromS3Async(resultKey)
+                .thenApply(result -> {
+                    conversionCache.putResult(conversion.getId(), result);
+                    return conversionMapper.toResponseDto(conversion, result);
+                })
+                .exceptionally(ex -> {
+                    log.warn("Failed to load result from S3 for conversion id={}", conversion.getId(), ex);
+                    return conversionMapper.toResponseDto(conversion, null);
+                });
+    }
+
+    private String resolveResult(Conversion conversion) throws IOException, InterruptedException {
+        if (hasText(conversion.getResultContent())) {
+            return conversion.getResultContent();
+        }
+        String resultKey = conversion.getResultFileKey();
+        if (!hasText(resultKey)) {
+            return null;
+        }
+        Optional<String> cached = conversionCache.getResult(conversion.getId());
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+        String result = downloadFromS3(resultKey);
+        conversionCache.putResult(conversion.getId(), result);
+        return result;
     }
 
     private String requestConversion(String xmlContent, ConversionType conversionType)
@@ -236,23 +287,37 @@ public class ConversionService {
         sendAndCheck(request, "s3service");
     }
 
-    private String downloadFromS3(String key) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(s3serviceUrl + "/s3/" + key))
-                .GET()
-                .build();
+    private CompletableFuture<String> downloadFromS3Async(String key) {
+        return httpClient.sendAsync(buildS3GetRequest(key), HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> extractBodyOrThrow(response, "s3service"));
+    }
 
-        return sendAndCheck(request, "s3service");
+    private String downloadFromS3(String key) throws IOException, InterruptedException {
+        return sendAndCheck(buildS3GetRequest(key), "s3service");
     }
 
     private String sendAndCheck(HttpRequest request, String serviceName) throws IOException, InterruptedException {
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return extractBodyOrThrow(httpClient.send(request, HttpResponse.BodyHandlers.ofString()), serviceName);
+    }
+
+    private HttpRequest buildS3GetRequest(String key) {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(s3serviceUrl + "/s3/" + key))
+                .GET()
+                .build();
+    }
+
+    private String extractBodyOrThrow(HttpResponse<String> response, String serviceName) {
         if (response.statusCode() >= 400) {
             throw new IllegalStateException(
                     serviceName + " returned HTTP " + response.statusCode() + ": " + response.body()
             );
         }
         return response.body();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private static String stripTrailingSlash(String url) {

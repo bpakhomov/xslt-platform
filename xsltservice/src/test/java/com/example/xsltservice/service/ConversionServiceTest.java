@@ -1,6 +1,8 @@
 package com.example.xsltservice.service;
 
 import com.example.xsltservice.dao.ConversionDao;
+import com.example.xsltservice.dao.ConversionFilter;
+import com.example.xsltservice.dto.request.ConversionFilterDto;
 import com.example.xsltservice.dto.request.ConversionRequestDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -221,6 +224,69 @@ class ConversionServiceTest {
 
         assertEquals(cachedDto, result);
         verify(dao, never()).save(any());
+    }
+
+    @Test
+    void enrichesPageFromDbRedisAndParallelS3WithNullOnFailure() throws Exception {
+        Map<String, String> s3Files = new LinkedHashMap<>();
+        s3Files.put("/s3/3-result.xml", "<from-s3/>");
+
+        Conversion fromDb = spyConversion(1L, null, "<db/>");
+        Conversion fromRedis = spyConversion(2L, "2-result.json", null);
+        Conversion fromS3 = spyConversion(3L, "3-result.xml", null);
+        Conversion failedS3 = spyConversion(4L, "missing.xml", null);
+
+        ConversionDao dao = mock(ConversionDao.class);
+        when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(fromDb, fromRedis, fromS3, failedS3));
+
+        ConversionCache cache = mock(ConversionCache.class);
+        when(cache.getResult(2L)).thenReturn(Optional.of("{\"cached\":true}"));
+        when(cache.getResult(3L)).thenReturn(Optional.empty());
+        when(cache.getResult(4L)).thenReturn(Optional.empty());
+
+        HttpServer s3Server = startS3Server(s3Files);
+        try {
+            ConversionService service = new ConversionService(
+                    dao,
+                    new ObjectMapper(),
+                    new ConversionMapper(),
+                    new TransactionTemplate(mock(PlatformTransactionManager.class)),
+                    cache,
+                    "http://localhost:8081",
+                    "http://localhost:" + s3Server.getAddress().getPort(),
+                    HttpClient.newHttpClient(),
+                    100
+            );
+
+            List<ConversionResponseDto> page = service.findByFilter(
+                    new ConversionFilterDto(10, 0, null, null, null, null, null, null, null, null, null)
+            );
+
+            assertEquals(4, page.size());
+            assertEquals("<db/>", page.get(0).result());
+            assertEquals("{\"cached\":true}", page.get(1).result());
+            assertEquals("<from-s3/>", page.get(2).result());
+            assertNull(page.get(3).result());
+            verify(cache).putResult(3L, "<from-s3/>");
+        } finally {
+            s3Server.stop(0);
+        }
+    }
+
+    private Conversion spyConversion(Long id, String resultFileKey, String resultContent) {
+        Conversion conversion = spy(new Conversion(
+                ConversionType.XML_TO_XML,
+                2.0,
+                LocalDateTime.of(2026, 11, 20, 11, 0),
+                null,
+                resultFileKey,
+                1,
+                1,
+                null,
+                resultContent
+        ));
+        when(conversion.getId()).thenReturn(id);
+        return conversion;
     }
 
     private ConversionDao mockDao() {
