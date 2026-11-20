@@ -17,5 +17,6 @@ public record ConversionResponseDto(
         @Schema String resultFileKey,
         @Schema Integer inputElementsCount,
         @Schema Integer outputElementsCount,
-        @Schema String result
+        @Schema String result,
+        @Schema String username
 ) {}

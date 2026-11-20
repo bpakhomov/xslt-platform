@@ -204,7 +204,8 @@ class ConversionServiceTest {
                 null,
                 1,
                 1,
-                "{\"a\":null}"
+                "{\"a\":null}",
+                null
         );
         when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of(cachedDto));
 

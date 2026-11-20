@@ -7,6 +7,7 @@ import com.example.xsltservice.dto.request.ConversionRequestDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
 import com.example.xsltservice.entity.ConversionType;
+import com.example.xsltservice.entity.User;
 import com.example.xsltservice.mapper.ConversionMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -169,6 +170,11 @@ public class ConversionService {
     }
 
     public ConversionResponseDto convertXml(ConversionRequestDto request) throws IOException, InterruptedException {
+        return convertXml(request, null);
+    }
+
+    public ConversionResponseDto convertXml(ConversionRequestDto request, User user)
+            throws IOException, InterruptedException {
         if (request == null) {
             throw new IllegalArgumentException("Request must not be null");
         }
@@ -199,7 +205,8 @@ public class ConversionService {
                 inputElementsCount,
                 outputElementsCount,
                 xmlContent,
-                resultContent
+                resultContent,
+                user
         );
         Conversion saved = transactionTemplate.execute(_ -> conversionDao.save(conversion));
 

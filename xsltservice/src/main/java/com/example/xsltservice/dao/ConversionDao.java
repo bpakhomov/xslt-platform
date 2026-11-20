@@ -3,6 +3,7 @@ package com.example.xsltservice.dao;
 import com.example.xsltservice.entity.Conversion;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -66,6 +67,7 @@ public class ConversionDao {
         CriteriaBuilder criteriaBuilder = session.getCriteriaBuilder();
         CriteriaQuery<Conversion> criteriaQuery = criteriaBuilder.createQuery(Conversion.class);
         Root<Conversion> root = criteriaQuery.from(Conversion.class);
+        root.fetch("user", JoinType.LEFT);
 
         List<Predicate> predicates = new ArrayList<>();
         if (filter.conversionType() != null) {
@@ -90,7 +92,13 @@ public class ConversionDao {
     }
 
     public Optional<Conversion> findById(Long id) {
-        return Optional.ofNullable(sessionFactory.getCurrentSession().find(Conversion.class, id));
+        if (id == null) {
+            return Optional.empty();
+        }
+        return sessionFactory.getCurrentSession()
+                .createSelectionQuery("from Conversion c left join fetch c.user where c.id = :id", Conversion.class)
+                .setParameter("id", id)
+                .uniqueResultOptional();
     }
 
     public Conversion save(Conversion conversion) {

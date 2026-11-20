@@ -5,6 +5,7 @@ import com.example.xsltservice.dto.request.ConversionFilterDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
 import com.example.xsltservice.entity.ConversionType;
+import com.example.xsltservice.entity.User;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -43,6 +44,32 @@ public class ConversionMapper {
             String sourceContent,
             String resultContent
     ) {
+        return toEntity(
+                conversionType,
+                conversionTime,
+                conversionDateTime,
+                sourceFileKey,
+                resultFileKey,
+                inputElementsCount,
+                outputElementsCount,
+                sourceContent,
+                resultContent,
+                null
+        );
+    }
+
+    public Conversion toEntity(
+            ConversionType conversionType,
+            double conversionTime,
+            LocalDateTime conversionDateTime,
+            String sourceFileKey,
+            String resultFileKey,
+            Integer inputElementsCount,
+            Integer outputElementsCount,
+            String sourceContent,
+            String resultContent,
+            User user
+    ) {
         return new Conversion(
                 conversionType,
                 conversionTime,
@@ -52,7 +79,8 @@ public class ConversionMapper {
                 inputElementsCount,
                 outputElementsCount,
                 sourceContent,
-                resultContent
+                resultContent,
+                user
         );
     }
 
@@ -73,6 +101,7 @@ public class ConversionMapper {
         if (conversion == null) {
             return null;
         }
+        String username = conversion.getUser() != null ? conversion.getUser().getUsername() : null;
         return new ConversionResponseDto(
                 conversion.getId(),
                 conversion.getConversionType(),
@@ -82,7 +111,8 @@ public class ConversionMapper {
                 conversion.getResultFileKey(),
                 conversion.getInputElementsCount(),
                 conversion.getOutputElementsCount(),
-                result
+                result,
+                username
         );
     }
 }

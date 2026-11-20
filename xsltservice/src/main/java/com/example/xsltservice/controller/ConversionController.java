@@ -3,6 +3,8 @@ package com.example.xsltservice.controller;
 import com.example.xsltservice.dto.request.ConversionFilterDto;
 import com.example.xsltservice.dto.request.ConversionRequestDto;
 import com.example.xsltservice.dto.response.ConversionResponseDto;
+import com.example.xsltservice.entity.User;
+import com.example.xsltservice.security.AuthUser;
 import com.example.xsltservice.service.ConversionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -12,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,9 +52,12 @@ public class ConversionController {
             @ApiResponse(responseCode = "400", description = "Пустой или невалидный XML"),
             @ApiResponse(responseCode = "502", description = "Ошибка при обращении к сервису конвертации")
     })
-    public ResponseEntity<ConversionResponseDto> convertXml(@RequestBody ConversionRequestDto request)
-            throws IOException, InterruptedException {
-        return ResponseEntity.ok(conversionService.convertXml(request));
+    public ResponseEntity<ConversionResponseDto> convertXml(
+            @RequestBody ConversionRequestDto request,
+            @AuthenticationPrincipal AuthUser authUser
+    ) throws IOException, InterruptedException {
+        User currentUser = authUser != null ? authUser.getUser() : null;
+        return ResponseEntity.ok(conversionService.convertXml(request, currentUser));
     }
 
     @GetMapping(value = "/request/{id}", produces = MediaType.APPLICATION_JSON_VALUE)

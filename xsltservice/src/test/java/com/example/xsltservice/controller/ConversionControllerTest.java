@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.http.MediaType;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -34,12 +35,13 @@ class ConversionControllerTest {
         DefaultFormattingConversionService formattingConversionService = new DefaultFormattingConversionService();
         mockMvc = MockMvcBuilders.standaloneSetup(new ConversionController(conversionService))
                 .setConversionService(formattingConversionService)
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
     }
 
     @Test
     void returnsBadRequestOnInvalidXmlOrFilter() throws Exception {
-        when(conversionService.convertXml(any(ConversionRequestDto.class)))
+        when(conversionService.convertXml(any(ConversionRequestDto.class), any()))
                 .thenThrow(new IllegalArgumentException("Invalid XML content"));
 
         mockMvc.perform(post("/request")
@@ -51,7 +53,7 @@ class ConversionControllerTest {
 
     @Test
     void returnsBadGatewayWhenConverterUnavailable() throws Exception {
-        when(conversionService.convertXml(any(ConversionRequestDto.class)))
+        when(conversionService.convertXml(any(ConversionRequestDto.class), any()))
                 .thenThrow(new IOException("Connection refused"));
 
         mockMvc.perform(post("/request")
@@ -72,7 +74,8 @@ class ConversionControllerTest {
                 "1-result.xml",
                 2,
                 1,
-                "<example param1=\"123\"/>"
+                "<example param1=\"123\"/>",
+                null
         );
         when(conversionService.getConversion(1L)).thenReturn(dto);
         when(conversionService.getConversion(999L)).thenThrow(new NoSuchElementException("Conversion not found: 999"));

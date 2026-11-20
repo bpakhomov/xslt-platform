@@ -40,6 +40,10 @@ public class Conversion {
     @Column(name = "result_content", columnDefinition = "TEXT")
     private String resultContent;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
+
     public Conversion() {
     }
 
@@ -76,6 +80,32 @@ public class Conversion {
             String sourceContent,
             String resultContent
     ) {
+        this(
+                conversionType,
+                conversionTime,
+                conversionDateTime,
+                sourceFileKey,
+                resultFileKey,
+                inputElementsCount,
+                outputElementsCount,
+                sourceContent,
+                resultContent,
+                null
+        );
+    }
+
+    public Conversion(
+            ConversionType conversionType,
+            double conversionTime,
+            LocalDateTime conversionDateTime,
+            String sourceFileKey,
+            String resultFileKey,
+            Integer inputElementsCount,
+            Integer outputElementsCount,
+            String sourceContent,
+            String resultContent,
+            User user
+    ) {
         this.conversionType = conversionType;
         this.conversionTime = conversionTime;
         this.conversionDateTime = conversionDateTime;
@@ -85,6 +115,7 @@ public class Conversion {
         this.outputElementsCount = outputElementsCount;
         this.sourceContent = sourceContent;
         this.resultContent = resultContent;
+        this.user = user;
     }
 
     public Long getId() {
@@ -161,5 +192,13 @@ public class Conversion {
 
     public void setResultContent(String resultContent) {
         this.resultContent = resultContent;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    public void setUser(User user) {
+        this.user = user;
     }
 }
