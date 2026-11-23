@@ -216,16 +216,87 @@ class UserServiceTest {
     class UpdatePassword {
         @Test
         void updatePasswordSuccessful() {
+            User user = new User("alice", "oldHash");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.update(user)).thenReturn(user);
 
+            User updated = userService.updatePassword(1L, "newSecret");
+
+            assertNotEquals("newSecret", updated.getPassword());
+            assertNotEquals("oldHash", updated.getPassword());
+            assertTrue(passwordEncoder.matches("newSecret", updated.getPassword()));
+            verify(userDao).update(user);
         }
 
+        @Test
+        void throwsWhenUserNotFound() {
+            when(userDao.findById(1L)).thenReturn(Optional.empty());
+
+            assertThrows(NoSuchElementException.class, () -> userService.updatePassword(1L, "newSecret"));
+            verify(userDao, never()).update(any());
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void throwsWhenPasswordIsBlank(String password) {
+            assertThrows(IllegalArgumentException.class, () -> userService.updatePassword(1L, password));
+            verifyNoInteractions(userDao);
+        }
     }
 
-    @Test
-    void deleteById() {
+    @Nested
+    class DeleteById {
+        @Test
+        void deletesUserWhenExists() {
+            when(userDao.deleteById(1L)).thenReturn(true);
+
+            userService.deleteById(1L);
+
+            verify(userDao).deleteById(1L);
+        }
+
+        @Test
+        void throwsWhenUserNotFound() {
+            when(userDao.deleteById(1L)).thenReturn(false);
+
+            assertThrows(NoSuchElementException.class, () -> userService.deleteById(1L));
+            verify(userDao).deleteById(1L);
+        }
     }
 
-    @Test
-    void matchesPassword() {
+    @Nested
+    class MatchesPassword {
+        @Test
+        void returnsTrueWhenPasswordMatches() {
+            String encoded = passwordEncoder.encode("secret123");
+
+            assertTrue(userService.matchesPassword("secret123", encoded));
+            verifyNoInteractions(userDao);
+        }
+
+        @Test
+        void returnsFalseWhenPasswordDoesNotMatch() {
+            String encoded = passwordEncoder.encode("secret123");
+
+            assertFalse(userService.matchesPassword("wrongPassword", encoded));
+            verifyNoInteractions(userDao);
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void returnsFalseWhenRawPasswordIsBlank(String rawPassword) {
+            assertFalse(userService.matchesPassword(rawPassword, "encodedHash"));
+            verifyNoInteractions(userDao);
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void returnsFalseWhenEncodedPasswordIsBlank(String encodedPassword) {
+            assertFalse(userService.matchesPassword("secret123", encodedPassword));
+            verifyNoInteractions(userDao);
+        }
     }
 }
