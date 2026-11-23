@@ -2,7 +2,11 @@ package com.example.xsltconverter.service;
 
 import com.example.xsltconverter.exception.XmlConversionException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -21,63 +25,68 @@ class DomXmlToJsonConverterTest {
         converter = new DomXmlToJsonConverter(objectMapper);
     }
 
-    @Test
-    void convertsSimpleXmlToJson() {
-        String xml = """
-            <user>
-                <id>42</id>
-                <name>Alice</name>
-            </user>
-            """;
+    @Nested
+    class Convert {
 
-        JsonNode root = objectMapper.readTree(converter.convert(xml));
+        @Test
+        void convertsSimpleXmlToJson() {
+            String xml = """
+                    <user>
+                        <id>42</id>
+                        <name>Alice</name>
+                    </user>
+                    """;
 
-        assertEquals("42", root.path("user").path("id").asString());
-        assertEquals("Alice", root.path("user").path("name").asString());
-    }
+            JsonNode root = objectMapper.readTree(converter.convert(xml));
 
-    @Test
-    void convertsRepeatedSiblingTagsToArray() {
-        String xml = """
-            <catalog>
-                <book><title>Clean Code</title></book>
-                <book><title>Domain-Driven Design</title></book>
-            </catalog>
-            """;
+            assertEquals("42", root.path("user").path("id").asString());
+            assertEquals("Alice", root.path("user").path("name").asString());
+        }
 
-        JsonNode books = objectMapper.readTree(converter.convert(xml))
-            .path("catalog")
-            .path("book");
+        @Test
+        void convertsRepeatedSiblingTagsToArray() {
+            String xml = """
+                    <catalog>
+                        <book><title>Clean Code</title></book>
+                        <book><title>Domain-Driven Design</title></book>
+                    </catalog>
+                    """;
 
-        assertTrue(books.isArray());
-        assertEquals(2, books.size());
-        assertEquals("Clean Code", books.get(0).path("title").asString());
-        assertEquals("Domain-Driven Design", books.get(1).path("title").asString());
-    }
+            JsonNode books = objectMapper.readTree(converter.convert(xml))
+                    .path("catalog")
+                    .path("book");
 
-    @Test
-    void convertsAttributesAndEmptyTag() {
-        String xml = """
-            <order id="10"><note>Say "Hi"</note><empty/></order>
-            """;
+            assertTrue(books.isArray());
+            assertEquals(2, books.size());
+            assertEquals("Clean Code", books.get(0).path("title").asString());
+            assertEquals("Domain-Driven Design", books.get(1).path("title").asString());
+        }
 
-        JsonNode order = objectMapper.readTree(converter.convert(xml)).path("order");
+        @Test
+        void convertsAttributesAndEmptyTag() {
+            String xml = """
+                    <order id="10"><note>Say "Hi"</note><empty/></order>
+                    """;
 
-        assertEquals("10", order.path("@id").asString());
-        assertEquals("Say \"Hi\"", order.path("note").asString());
-        assertTrue(order.path("empty").isNull());
-    }
+            JsonNode order = objectMapper.readTree(converter.convert(xml)).path("order");
 
-    @Test
-    void convertsEmptyRootToNullValue() {
-        JsonNode root = objectMapper.readTree(converter.convert("<ping/>"));
+            assertEquals("10", order.path("@id").asString());
+            assertEquals("Say \"Hi\"", order.path("note").asString());
+            assertTrue(order.path("empty").isNull());
+        }
 
-        assertTrue(root.path("ping").isNull());
-    }
+        @Test
+        void convertsEmptyRootToNullValue() {
+            JsonNode root = objectMapper.readTree(converter.convert("<ping/>"));
 
-    @Test
-    void throwsOnInvalidOrBlankXml() {
-        assertThrows(XmlConversionException.class, () -> converter.convert("<unclosed>"));
-        assertThrows(XmlConversionException.class, () -> converter.convert("   "));
+            assertTrue(root.path("ping").isNull());
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {"   ", "<unclosed>"})
+        void throwsWhenXmlIsBlankOrInvalid(String xml) {
+            assertThrows(XmlConversionException.class, () -> converter.convert(xml));
+        }
     }
 }

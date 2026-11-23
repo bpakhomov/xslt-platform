@@ -2,7 +2,11 @@ package com.example.xsltservice.service;
 
 import com.example.xsltservice.service.ConversionService.ConversionMetricsCalculator;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,42 +21,56 @@ class ConversionMetricsCalculatorTest {
         calculator = new ConversionMetricsCalculator(new ObjectMapper());
     }
 
-    @Test
-    void countsXmlTagsIncludingNestedAndSelfClosing() {
-        String xml = """
-            <order id="10">
-                <item>Book</item>
-                <item>Pen</item>
-                <note/>
-            </order>
-            """;
+    @Nested
+    class CountXmlTags {
 
-        assertEquals(4, calculator.countXmlTags(xml));
+        @Test
+        void countsNestedAndSelfClosingTags() {
+            String xml = """
+                    <order id="10">
+                        <item>Book</item>
+                        <item>Pen</item>
+                        <note/>
+                    </order>
+                    """;
+
+            assertEquals(4, calculator.countXmlTags(xml));
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {"   ", "<broken>"})
+        void throwsWhenXmlIsBlankOrInvalid(String xml) {
+            assertThrows(IllegalArgumentException.class, () -> calculator.countXmlTags(xml));
+        }
     }
 
-    @Test
-    void countsJsonKeysAcrossObjectsAndArrays() {
-        String json = """
-            {
-              "order": {
-                "@id": "10",
-                "item": [
-                  {"name": "Book"},
-                  {"name": "Pen"}
-                ],
-                "note": null
-              }
-            }
-            """;
+    @Nested
+    class CountJsonKeys {
 
-        assertEquals(6, calculator.countJsonKeys(json));
-    }
+        @Test
+        void countsKeysAcrossObjectsAndArrays() {
+            String json = """
+                    {
+                      "order": {
+                        "@id": "10",
+                        "item": [
+                          {"name": "Book"},
+                          {"name": "Pen"}
+                        ],
+                        "note": null
+                      }
+                    }
+                    """;
 
-    @Test
-    void throwsOnInvalidOrBlankInput() {
-        assertThrows(IllegalArgumentException.class, () -> calculator.countXmlTags("  "));
-        assertThrows(IllegalArgumentException.class, () -> calculator.countXmlTags("<broken>"));
-        assertThrows(IllegalArgumentException.class, () -> calculator.countJsonKeys("  "));
-        assertThrows(IllegalArgumentException.class, () -> calculator.countJsonKeys("{invalid"));
+            assertEquals(6, calculator.countJsonKeys(json));
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {"   ", "{invalid"})
+        void throwsWhenJsonIsBlankOrInvalid(String json) {
+            assertThrows(IllegalArgumentException.class, () -> calculator.countJsonKeys(json));
+        }
     }
 }

@@ -13,6 +13,7 @@ import io.minio.Result;
 import io.minio.messages.Item;
 import okhttp3.Headers;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,42 +42,74 @@ class MinioStorageServiceTest {
         );
     }
 
-    @Test
-    void createsBucketAndUploads() throws Exception {
-        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+    @Nested
+    class Upload {
 
-        byte[] payload = "<root/>".getBytes(StandardCharsets.UTF_8);
-        String key = service.upload("test.xml", new ByteArrayInputStream(payload), payload.length, "application/xml");
+        @Test
+        void createsBucketWhenMissingAndUploadsObject() throws Exception {
+            when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+            byte[] payload = "<root/>".getBytes(StandardCharsets.UTF_8);
 
-        verify(minioClient).makeBucket(any(MakeBucketArgs.class));
-        verify(minioClient).putObject(any(PutObjectArgs.class));
-        assertEquals("test.xml", key);
+            String key = service.upload("test.xml", new ByteArrayInputStream(payload), payload.length, "application/xml");
+
+            assertEquals("test.xml", key);
+            verify(minioClient).makeBucket(any(MakeBucketArgs.class));
+            verify(minioClient).putObject(any(PutObjectArgs.class));
+        }
+
+        @Test
+        void reusesExistingBucketAndUploadsObject() throws Exception {
+            when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
+            byte[] payload = "<root/>".getBytes(StandardCharsets.UTF_8);
+
+            String key = service.upload("test.xml", new ByteArrayInputStream(payload), payload.length, "application/xml");
+
+            assertEquals("test.xml", key);
+            verify(minioClient, never()).makeBucket(any(MakeBucketArgs.class));
+            verify(minioClient).putObject(any(PutObjectArgs.class));
+        }
     }
 
-    @Test
-    void downloadsObject() throws Exception {
-        byte[] payload = "<ok/>".getBytes(StandardCharsets.UTF_8);
-        GetObjectResponse response = new GetObjectResponse(
-                Headers.of(), "xslt-storage", null, "doc.xml", new ByteArrayInputStream(payload)
-        );
-        when(minioClient.getObject(any(GetObjectArgs.class))).thenReturn(response);
+    @Nested
+    class Download {
 
-        assertArrayEquals(payload, service.download("doc.xml"));
+        @Test
+        void downloadsObjectBytes() throws Exception {
+            byte[] payload = "<ok/>".getBytes(StandardCharsets.UTF_8);
+            GetObjectResponse response = new GetObjectResponse(
+                    Headers.of(), "xslt-storage", null, "doc.xml", new ByteArrayInputStream(payload)
+            );
+            when(minioClient.getObject(any(GetObjectArgs.class))).thenReturn(response);
+
+            assertArrayEquals(payload, service.download("doc.xml"));
+        }
     }
 
-    @Test
-    @SuppressWarnings("unchecked")
-    void listsAndDeletesObjects() throws Exception {
-        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
-        Item item = mock(Item.class);
-        when(item.objectName()).thenReturn("a.xml");
-        Result<Item> result = mock(Result.class);
-        when(result.get()).thenReturn(item);
-        when(minioClient.listObjects(any(ListObjectsArgs.class))).thenReturn(List.of(result));
+    @Nested
+    class ListObjects {
 
-        assertEquals(List.of("a.xml"), service.list());
+        @Test
+        @SuppressWarnings("unchecked")
+        void returnsObjectNames() throws Exception {
+            when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
+            Item item = mock(Item.class);
+            when(item.objectName()).thenReturn("a.xml");
+            Result<Item> result = mock(Result.class);
+            when(result.get()).thenReturn(item);
+            when(minioClient.listObjects(any(ListObjectsArgs.class))).thenReturn(List.of(result));
 
-        service.delete("a.xml");
-        verify(minioClient).removeObject(any(RemoveObjectArgs.class));
+            assertEquals(List.of("a.xml"), service.list());
+        }
+    }
+
+    @Nested
+    class Delete {
+
+        @Test
+        void removesObjectFromBucket() throws Exception {
+            service.delete("a.xml");
+
+            verify(minioClient).removeObject(any(RemoveObjectArgs.class));
+        }
     }
 }
