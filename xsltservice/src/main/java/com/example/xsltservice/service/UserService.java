@@ -2,6 +2,7 @@ package com.example.xsltservice.service;
 
 import com.example.xsltservice.dao.UserDao;
 import com.example.xsltservice.entity.User;
+import com.example.xsltservice.entity.UserStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -16,16 +17,27 @@ public class UserService {
     private final UserDao userDao;
     private final TransactionTemplate transactionTemplate;
     private final PasswordEncoder passwordEncoder;
+    private final UserCache userCache;
 
-    @Autowired
     public UserService(
             UserDao userDao,
             TransactionTemplate transactionTemplate,
             PasswordEncoder passwordEncoder
     ) {
+        this(userDao, transactionTemplate, passwordEncoder, null);
+    }
+
+    @Autowired
+    public UserService(
+            UserDao userDao,
+            TransactionTemplate transactionTemplate,
+            PasswordEncoder passwordEncoder,
+            UserCache userCache
+    ) {
         this.userDao = userDao;
         this.transactionTemplate = transactionTemplate;
         this.passwordEncoder = passwordEncoder;
+        this.userCache = userCache;
     }
 
     public User createUser(String username, String rawPassword) {
@@ -33,28 +45,29 @@ public class UserService {
         String validPassword = requireText(rawPassword, "Password");
         String encodedPassword = passwordEncoder.encode(validPassword);
 
-        return transactionTemplate.execute(_ -> {
-            if (userDao.existsByUsername(validUsername)) {
-                throw new IllegalArgumentException("Username already exists: " + validUsername);
-            }
-            return userDao.save(new User(validUsername, encodedPassword));
-        });
+        User createdUser = transactionTemplate.execute(_ -> persistNewUserInDb(validUsername, encodedPassword));
+        cacheUser(createdUser);
+        return createdUser;
     }
 
     public User getById(long id) {
-        User user = transactionTemplate.execute(_ -> userDao.findById(id).orElse(null));
-        if (user == null) {
-            throw new NoSuchElementException("User not found: " + id);
-        }
-        return user;
+        return transactionTemplate.execute(_ -> requireUserById(id));
     }
 
     public Optional<User> findByUsername(String username) {
         if (!hasText(username)) {
             return Optional.empty();
         }
-        User user = transactionTemplate.execute(_ -> userDao.findByUsername(username).orElse(null));
-        return Optional.ofNullable(user);
+        Optional<User> cachedUser = readFromCache(username);
+        if (cachedUser.isPresent()) {
+            return cachedUser;
+        }
+        User dbUser = transactionTemplate.execute(_ -> findUserInDb(username));
+        if (dbUser == null) {
+            return Optional.empty();
+        }
+        cacheUser(dbUser);
+        return Optional.of(dbUser);
     }
 
     public List<User> findAll() {
@@ -64,35 +77,35 @@ public class UserService {
 
     public User updateUsername(long id, String newUsername) {
         String validUsername = requireText(newUsername, "Username");
-        return transactionTemplate.execute(_ -> {
-            User user = userDao.findById(id)
-                    .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
-            if (!validUsername.equals(user.getUsername()) && userDao.existsByUsername(validUsername)) {
-                throw new IllegalArgumentException("Username already exists: " + validUsername);
-            }
-            user.setUsername(validUsername);
-            return userDao.update(user);
-        });
+        RenamedUser renamed = transactionTemplate.execute(_ -> renameUserInDb(id, validUsername));
+        String previousUsername = renamed.previousUsername();
+        User updatedUser = renamed.user();
+        if (!validUsername.equals(previousUsername)) {
+            evictFromCache(previousUsername);
+        }
+        cacheUser(updatedUser);
+        return updatedUser;
     }
 
     public User updatePassword(long id, String newRawPassword) {
         String validPassword = requireText(newRawPassword, "Password");
         String encodedPassword = passwordEncoder.encode(validPassword);
-        return transactionTemplate.execute(_ -> {
-            User user = userDao.findById(id)
-                    .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
-            user.setPassword(encodedPassword);
-            return userDao.update(user);
-        });
+        User updatedUser = transactionTemplate.execute(_ -> changePasswordInDb(id, encodedPassword));
+        cacheUser(updatedUser);
+        return updatedUser;
+    }
+
+    public User deactivateById(long id) {
+        return updateStatus(id, UserStatus.DISABLED);
+    }
+
+    public User activateById(long id) {
+        return updateStatus(id, UserStatus.ACTIVE);
     }
 
     public void deleteById(long id) {
-        boolean deleted = Boolean.TRUE.equals(
-                transactionTemplate.execute(_ -> userDao.deleteById(id))
-        );
-        if (!deleted) {
-            throw new NoSuchElementException("User not found: " + id);
-        }
+        String deletedUsername = transactionTemplate.execute(_ -> removeUserInDb(id));
+        evictFromCache(deletedUsername);
     }
 
     public boolean matchesPassword(String rawPassword, String encodedPassword) {
@@ -100,6 +113,75 @@ public class UserService {
             return false;
         }
         return passwordEncoder.matches(rawPassword, encodedPassword);
+    }
+
+    private User updateStatus(long id, UserStatus targetStatus) {
+        User updatedUser = transactionTemplate.execute(_ -> changeStatusInDb(id, targetStatus));
+        cacheUser(updatedUser);
+        return updatedUser;
+    }
+
+    private User persistNewUserInDb(String username, String encodedPassword) {
+        if (userDao.existsByUsername(username)) {
+            throw new IllegalArgumentException("Username already exists: " + username);
+        }
+        return userDao.save(new User(username, encodedPassword));
+    }
+
+    private User findUserInDb(String username) {
+        return userDao.findByUsername(username).orElse(null);
+    }
+
+    private RenamedUser renameUserInDb(long id, String newUsername) {
+        User existingUser = requireUserById(id);
+        String previousUsername = existingUser.getUsername();
+        if (!newUsername.equals(previousUsername) && userDao.existsByUsername(newUsername)) {
+            throw new IllegalArgumentException("Username already exists: " + newUsername);
+        }
+        existingUser.setUsername(newUsername);
+        User updatedUser = userDao.update(existingUser);
+        return new RenamedUser(previousUsername, updatedUser);
+    }
+
+    private User changePasswordInDb(long id, String encodedPassword) {
+        User existingUser = requireUserById(id);
+        existingUser.setPassword(encodedPassword);
+        return userDao.update(existingUser);
+    }
+
+    private User changeStatusInDb(long id, UserStatus targetStatus) {
+        User existingUser = requireUserById(id);
+        existingUser.setStatus(targetStatus);
+        return userDao.update(existingUser);
+    }
+
+    private String removeUserInDb(long id) {
+        User existingUser = requireUserById(id);
+        if (!userDao.deleteById(id)) {
+            throw new NoSuchElementException("User not found: " + id);
+        }
+        return existingUser.getUsername();
+    }
+
+    private User requireUserById(long id) {
+        return userDao.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
+    }
+
+    private Optional<User> readFromCache(String username) {
+        return userCache != null ? userCache.get(username) : Optional.empty();
+    }
+
+    private void cacheUser(User user) {
+        if (userCache != null && user != null) {
+            userCache.put(user);
+        }
+    }
+
+    private void evictFromCache(String username) {
+        if (userCache != null && hasText(username)) {
+            userCache.evict(username);
+        }
     }
 
     private static String requireText(String value, String fieldName) {
@@ -111,5 +193,8 @@ public class UserService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record RenamedUser(String previousUsername, User user) {
     }
 }

@@ -44,6 +44,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private void authenticate(String username, HttpServletRequest request) {
         try {
             UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            if (!userDetails.isEnabled()) {
+                return;
+            }
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     userDetails,
                     null,

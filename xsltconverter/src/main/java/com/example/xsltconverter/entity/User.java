@@ -2,10 +2,13 @@ package com.example.xsltconverter.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 
 @Entity
 @Table(name = "users")
@@ -21,12 +24,18 @@ public class User {
     @Column(name = "password", nullable = false)
     private String password;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 32)
+    @ColumnDefault("'ACTIVE'")
+    private UserStatus status = UserStatus.ACTIVE;
+
     public User() {
     }
 
     public User(String username, String password) {
         this.username = username;
         this.password = password;
+        this.status = UserStatus.ACTIVE;
     }
 
     public long getId() {
@@ -51,5 +60,17 @@ public class User {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public UserStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(UserStatus status) {
+        this.status = status;
+    }
+
+    public boolean isActive() {
+        return status == UserStatus.ACTIVE;
     }
 }

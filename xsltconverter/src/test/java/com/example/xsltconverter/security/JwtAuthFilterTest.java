@@ -1,6 +1,7 @@
 package com.example.xsltconverter.security;
 
 import com.example.xsltconverter.entity.User;
+import com.example.xsltconverter.entity.UserStatus;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +64,21 @@ class JwtAuthFilterTest {
 
             assertNotNull(SecurityContextHolder.getContext().getAuthentication());
             assertEquals("alice", SecurityContextHolder.getContext().getAuthentication().getName());
+            verify(chain).doFilter(request, response);
+        }
+
+        @Test
+        void leavesContextEmptyWhenUserIsDisabled() throws Exception {
+            String token = jwtService.generateToken("alice");
+            User disabledUser = new User("alice", "hashed");
+            disabledUser.setStatus(UserStatus.DISABLED);
+            when(userDetailsService.loadUserByUsername("alice"))
+                    .thenReturn(new AuthUser(disabledUser));
+            request.addHeader("Authorization", "Bearer " + token);
+
+            filter.doFilter(request, response, chain);
+
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
             verify(chain).doFilter(request, response);
         }
 

@@ -2,6 +2,7 @@ package com.example.xsltservice.service;
 
 import com.example.xsltservice.dao.UserDao;
 import com.example.xsltservice.entity.User;
+import com.example.xsltservice.entity.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -24,17 +25,20 @@ import static org.mockito.Mockito.*;
 class UserServiceTest {
 
     private UserDao userDao;
+    private UserCache userCache;
     private PasswordEncoder passwordEncoder;
     private UserService userService;
 
     @BeforeEach
     void setUp() {
         userDao = mock(UserDao.class);
+        userCache = mock(UserCache.class);
         passwordEncoder = new BCryptPasswordEncoder();
         userService = new UserService(
                 userDao,
                 new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                passwordEncoder
+                passwordEncoder,
+                userCache
         );
     }
 
@@ -52,6 +56,7 @@ class UserServiceTest {
             assertNotEquals("secret123", created.getPassword());
             assertTrue(passwordEncoder.matches("secret123", created.getPassword()));
             verify(userDao).save(any(User.class));
+            verify(userCache).put(created);
         }
 
         @Test
@@ -60,6 +65,7 @@ class UserServiceTest {
 
             assertThrows(IllegalArgumentException.class, () -> userService.createUser("alice", "secret123"));
             verify(userDao, never()).save(any());
+            verifyNoInteractions(userCache);
         }
 
         @ParameterizedTest
@@ -67,7 +73,7 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void throwsWhenUsernameIsBlank(String username) {
             assertThrows(IllegalArgumentException.class, () -> userService.createUser(username, "secret123"));
-            verifyNoInteractions(userDao);
+            verifyNoInteractions(userDao, userCache);
         }
 
         @ParameterizedTest
@@ -75,7 +81,7 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void throwsWhenPasswordIsBlank(String password) {
             assertThrows(IllegalArgumentException.class, () -> userService.createUser("alice", password));
-            verifyNoInteractions(userDao);
+            verifyNoInteractions(userDao, userCache);
         }
     }
 
@@ -106,25 +112,44 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void returnsEmptyWhenUsernameIsBlank(String username) {
             assertTrue(userService.findByUsername(username).isEmpty());
+            verifyNoInteractions(userDao, userCache);
+        }
+
+        @Test
+        void returnsCachedUserWithoutDatabaseLookup() {
+            User cached = new User("ivan", "qwerty");
+            cached.setId(5L);
+            when(userCache.get("ivan")).thenReturn(Optional.of(cached));
+
+            Optional<User> found = userService.findByUsername("ivan");
+
+            assertTrue(found.isPresent());
+            assertEquals(5L, found.get().getId());
+            assertEquals("ivan", found.get().getUsername());
             verifyNoInteractions(userDao);
+            verify(userCache, never()).put(any());
         }
 
         @Test
         void returnsUserWhenFound() {
             User user = new User("ivan", "qwerty");
+            when(userCache.get("ivan")).thenReturn(Optional.empty());
             when(userDao.findByUsername("ivan")).thenReturn(Optional.of(user));
 
             Optional<User> found = userService.findByUsername("ivan");
 
             assertTrue(found.isPresent());
             assertEquals("ivan", found.get().getUsername());
+            verify(userCache).put(user);
         }
 
         @Test
         void returnsEmptyWhenNotFound() {
+            when(userCache.get("missing")).thenReturn(Optional.empty());
             when(userDao.findByUsername("missing")).thenReturn(Optional.empty());
 
             assertTrue(userService.findByUsername("missing").isEmpty());
+            verify(userCache, never()).put(any());
         }
     }
 
@@ -167,6 +192,8 @@ class UserServiceTest {
             assertEquals("newName", updated.getUsername());
             verify(userDao).existsByUsername("newName");
             verify(userDao).update(user);
+            verify(userCache).evict("name");
+            verify(userCache).put(updated);
         }
 
         @Test
@@ -174,8 +201,9 @@ class UserServiceTest {
             when(userDao.findById(1L)).thenReturn(Optional.empty());
 
             assertThrows(NoSuchElementException.class, () -> userService.updateUsername(1L, "name"));
-            verify(userDao,never()).existsByUsername(any());
+            verify(userDao, never()).existsByUsername(any());
             verify(userDao, never()).update(any());
+            verifyNoInteractions(userCache);
         }
 
         @Test
@@ -185,17 +213,15 @@ class UserServiceTest {
 
             assertThrows(IllegalArgumentException.class, () -> userService.updateUsername(1L, "name"));
             verify(userDao, never()).update(any());
+            verifyNoInteractions(userCache);
         }
 
         @ParameterizedTest
         @NullAndEmptySource
         @ValueSource(strings = "   ")
         void updateUsername(String username) {
-            when(userDao.findById(1L)).thenReturn(Optional.of(new User()));
-
             assertThrows(IllegalArgumentException.class, () -> userService.updateUsername(1L, username));
-            verify(userDao, never()).existsByUsername(any());
-            verify(userDao, never()).update(any());
+            verifyNoInteractions(userDao, userCache);
         }
 
         @Test
@@ -209,6 +235,8 @@ class UserServiceTest {
             assertEquals("name", updated.getUsername());
             verify(userDao, never()).existsByUsername(any());
             verify(userDao).update(user);
+            verify(userCache, never()).evict(any());
+            verify(userCache).put(updated);
         }
     }
 
@@ -226,6 +254,7 @@ class UserServiceTest {
             assertNotEquals("oldHash", updated.getPassword());
             assertTrue(passwordEncoder.matches("newSecret", updated.getPassword()));
             verify(userDao).update(user);
+            verify(userCache).put(updated);
         }
 
         @Test
@@ -234,6 +263,7 @@ class UserServiceTest {
 
             assertThrows(NoSuchElementException.class, () -> userService.updatePassword(1L, "newSecret"));
             verify(userDao, never()).update(any());
+            verifyNoInteractions(userCache);
         }
 
         @ParameterizedTest
@@ -241,7 +271,62 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void throwsWhenPasswordIsBlank(String password) {
             assertThrows(IllegalArgumentException.class, () -> userService.updatePassword(1L, password));
-            verifyNoInteractions(userDao);
+            verifyNoInteractions(userDao, userCache);
+        }
+    }
+
+    @Nested
+    class DeactivateById {
+        @Test
+        void deactivatesUserAndOverwritesCache() {
+            User user = new User("alice", "hash");
+            user.setId(1L);
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.update(user)).thenReturn(user);
+
+            User result = userService.deactivateById(1L);
+
+            assertEquals(UserStatus.DISABLED, result.getStatus());
+            assertFalse(result.isActive());
+            verify(userDao).update(user);
+            verify(userCache).put(result);
+        }
+
+        @Test
+        void throwsWhenUserNotFound() {
+            when(userDao.findById(1L)).thenReturn(Optional.empty());
+
+            assertThrows(NoSuchElementException.class, () -> userService.deactivateById(1L));
+            verify(userDao, never()).update(any());
+            verifyNoInteractions(userCache);
+        }
+    }
+
+    @Nested
+    class ActivateById {
+        @Test
+        void activatesUserAndOverwritesCache() {
+            User user = new User("alice", "hash");
+            user.setId(1L);
+            user.setStatus(UserStatus.DISABLED);
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.update(user)).thenReturn(user);
+
+            User result = userService.activateById(1L);
+
+            assertEquals(UserStatus.ACTIVE, result.getStatus());
+            assertTrue(result.isActive());
+            verify(userDao).update(user);
+            verify(userCache).put(result);
+        }
+
+        @Test
+        void throwsWhenUserNotFound() {
+            when(userDao.findById(1L)).thenReturn(Optional.empty());
+
+            assertThrows(NoSuchElementException.class, () -> userService.activateById(1L));
+            verify(userDao, never()).update(any());
+            verifyNoInteractions(userCache);
         }
     }
 
@@ -249,19 +334,33 @@ class UserServiceTest {
     class DeleteById {
         @Test
         void deletesUserWhenExists() {
+            User user = new User("alice", "hash");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
             when(userDao.deleteById(1L)).thenReturn(true);
 
             userService.deleteById(1L);
 
             verify(userDao).deleteById(1L);
+            verify(userCache).evict("alice");
         }
 
         @Test
         void throwsWhenUserNotFound() {
+            when(userDao.findById(1L)).thenReturn(Optional.empty());
+
+            assertThrows(NoSuchElementException.class, () -> userService.deleteById(1L));
+            verify(userDao, never()).deleteById(anyLong());
+            verifyNoInteractions(userCache);
+        }
+
+        @Test
+        void throwsWhenDeleteReturnsFalse() {
+            User user = new User("alice", "hash");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
             when(userDao.deleteById(1L)).thenReturn(false);
 
             assertThrows(NoSuchElementException.class, () -> userService.deleteById(1L));
-            verify(userDao).deleteById(1L);
+            verifyNoInteractions(userCache);
         }
     }
 
