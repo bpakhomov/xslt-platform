@@ -8,24 +8,24 @@ import com.example.xsltservice.dto.response.ConversionResponseDto;
 import com.example.xsltservice.entity.Conversion;
 import com.example.xsltservice.entity.ConversionType;
 import com.example.xsltservice.mapper.ConversionMapper;
-import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
-import java.nio.charset.StandardCharsets;
+import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -36,22 +36,50 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ConversionServiceTest {
 
-    @Test
-    void convertsXmlToXmlSavesContentToDbAndCountsOutputTags() throws Exception {
-        Map<String, String> uploadedFiles = new LinkedHashMap<>();
-        String inputXml = "<example><param1>123</param1><inner><param2>456</param2></inner></example>";
-        String outputXml = "<example param1=\"123\"><inner param2=\"456\"/></example>";
+    private ConversionDao dao;
+    private ConversionCache cache;
+    private HttpClient httpClient;
+    private ConversionService service;
 
-        ConversionDao dao = mockDao();
-        HttpServer converterServer = startConverterServer("XML_TO_XML", outputXml);
-        HttpServer s3Server = startS3Server(uploadedFiles);
-        try {
-            ConversionService service = createService(dao, converterServer, s3Server);
+    @BeforeEach
+    void setUp() {
+        dao = mock(ConversionDao.class);
+        cache = mock(ConversionCache.class);
+        httpClient = mock(HttpClient.class);
+        when(dao.save(any(Conversion.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(cache.get(any(), any())).thenReturn(Optional.empty());
+        service = new ConversionService(
+                dao,
+                new ObjectMapper(),
+                new ConversionMapper(),
+                new TransactionTemplate(mock(PlatformTransactionManager.class)),
+                cache,
+                "http://localhost:8081",
+                "http://localhost:8082",
+                httpClient,
+                null,
+                null,
+                100
+        );
+    }
+
+    @Nested
+    class ConvertXml {
+
+        @Test
+        void convertsXmlToXmlAndSavesToDb() throws Exception {
+            String inputXml = "<example><param1>123</param1><inner><param2>456</param2></inner></example>";
+            String outputXml = "<example param1=\"123\"><inner param2=\"456\"/></example>";
+            HttpResponse<String> okResponse = mockResponse(200, outputXml);
+            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(okResponse);
 
             ConversionResponseDto response = service.convertXml(
                     new ConversionRequestDto(inputXml, ConversionType.XML_TO_XML)
@@ -61,32 +89,18 @@ class ConversionServiceTest {
             assertEquals(4, response.inputElementsCount());
             assertEquals(2, response.outputElementsCount());
             assertEquals(outputXml, response.result());
-            assertNull(response.sourceFileKey());
-            assertNull(response.resultFileKey());
-            assertTrue(uploadedFiles.isEmpty());
             verify(dao).save(argThat(saved ->
-                    saved.getSourceFileKey() == null
-                            && saved.getResultFileKey() == null
-                            && inputXml.equals(saved.getSourceContent())
-                            && outputXml.equals(saved.getResultContent())
+                    inputXml.equals(saved.getSourceContent()) && outputXml.equals(saved.getResultContent())
             ));
-        } finally {
-            converterServer.stop(0);
-            s3Server.stop(0);
         }
-    }
 
-    @Test
-    void convertsXmlToJsonAndDefaultsTypeWhenOmitted() throws Exception {
-        Map<String, String> uploadedFiles = new LinkedHashMap<>();
-        String inputXml = "<user><name>Alice</name></user>";
-        String outputJson = "{\"user\":{\"name\":\"Alice\"}}";
-
-        ConversionDao dao = mockDao();
-        HttpServer converterServer = startConverterServer("XML_TO_JSON", outputJson);
-        HttpServer s3Server = startS3Server(uploadedFiles);
-        try {
-            ConversionService service = createService(dao, converterServer, s3Server);
+        @Test
+        void defaultsTypeToXmlToJsonWhenOmitted() throws Exception {
+            String inputXml = "<user><name>Alice</name></user>";
+            String outputJson = "{\"user\":{\"name\":\"Alice\"}}";
+            HttpResponse<String> okResponse = mockResponse(200, outputJson);
+            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(okResponse);
 
             ConversionResponseDto response = service.convertXml(new ConversionRequestDto(inputXml, null));
 
@@ -94,189 +108,257 @@ class ConversionServiceTest {
             assertEquals(2, response.inputElementsCount());
             assertEquals(2, response.outputElementsCount());
             assertEquals(outputJson, response.result());
-            assertNull(response.resultFileKey());
-            assertTrue(uploadedFiles.isEmpty());
-            verify(dao).save(argThat(saved ->
-                    inputXml.equals(saved.getSourceContent())
-                            && outputJson.equals(saved.getResultContent())
-            ));
-        } finally {
-            converterServer.stop(0);
-            s3Server.stop(0);
         }
-    }
 
-    @Test
-    void getsConversionByIdFromS3OrDbFallback() throws Exception {
-        Map<String, String> s3Files = new LinkedHashMap<>();
-        s3Files.put("/s3/abc-result.xml", "<example param1=\"123\"/>");
+        @Test
+        void returnsCachedResponseWithoutCallingConverterOrDb() throws Exception {
+            ConversionResponseDto cachedDto = new ConversionResponseDto(
+                    5L, ConversionType.XML_TO_JSON, 1.2,
+                    LocalDateTime.of(2026, 11, 20, 10, 0),
+                    null, null, 1, 1, "{\"a\":null}", null
+            );
+            when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of(cachedDto));
 
-        ConversionDao dao = mock(ConversionDao.class);
-        Conversion migrated = new Conversion(
-                ConversionType.XML_TO_XML,
-                5.2,
-                LocalDateTime.of(2026, 11, 18, 14, 0),
-                "abc-source.xml",
-                "abc-result.xml",
-                2,
-                1
-        );
-        Conversion pending = new Conversion(
-                ConversionType.XML_TO_JSON,
-                3.1,
-                LocalDateTime.of(2026, 11, 19, 12, 0),
-                null,
-                null,
-                2,
-                1,
-                "<a/>",
-                "{\"a\":null}"
-        );
-        when(dao.findById(1L)).thenReturn(Optional.of(migrated));
-        when(dao.findById(2L)).thenReturn(Optional.of(pending));
-        when(dao.findById(99L)).thenReturn(Optional.empty());
+            ConversionResponseDto result = service.convertXml(
+                    new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON)
+            );
 
-        HttpServer s3Server = startS3Server(s3Files);
-        try {
-            ConversionService service = createService(dao, null, s3Server);
-
-            ConversionResponseDto foundMigrated = service.getConversion(1L);
-            assertEquals("abc-result.xml", foundMigrated.resultFileKey());
-            assertEquals("<example param1=\"123\"/>", foundMigrated.result());
-
-            ConversionResponseDto foundPending = service.getConversion(2L);
-            assertEquals("{\"a\":null}", foundPending.result());
-
-            assertThrows(NoSuchElementException.class, () -> service.getConversion(99L));
-        } finally {
-            s3Server.stop(0);
+            assertEquals(cachedDto, result);
+            verifyNoInteractions(dao, httpClient);
         }
-    }
 
-    @Test
-    void migratesPendingConversionsToS3AndUpdatesKeysInBatch() throws Exception {
-        Map<String, String> uploadedFiles = new LinkedHashMap<>();
-        ConversionDao dao = mock(ConversionDao.class);
-        Conversion pending = spy(new Conversion(
-                ConversionType.XML_TO_JSON,
-                4.0,
-                LocalDateTime.of(2026, 11, 19, 12, 0),
-                null,
-                null,
-                1,
-                1,
-                "<ping/>",
-                "{\"ping\":null}"
-        ));
-        when(pending.getId()).thenReturn(7L);
-        when(dao.getConversionsForMigration(100)).thenReturn(List.of(pending));
-
-        HttpServer s3Server = startS3Server(uploadedFiles);
-        try {
-            ConversionService service = createService(dao, null, s3Server);
-
-            service.migrateConversionsToS3();
-
-            assertEquals(2, uploadedFiles.size());
-            assertTrue(uploadedFiles.containsValue("<ping/>"));
-            assertTrue(uploadedFiles.containsValue("{\"ping\":null}"));
-            verify(dao).updateConversionsAfterMigration(argThat(items ->
-                    items.size() == 1
-                            && items.getFirst().id().equals(7L)
-                            && items.getFirst().sourceKey().equals("7-source.xml")
-                            && items.getFirst().resultKey().equals("7-result.json")
-            ));
-        } finally {
-            s3Server.stop(0);
-        }
-    }
-
-    @Test
-    void returnsCachedConversionWithoutCallingConverterOrDb() throws Exception {
-        ConversionDao dao = mock(ConversionDao.class);
-        ConversionCache cache = mock(ConversionCache.class);
-        ConversionResponseDto cachedDto = new ConversionResponseDto(
-                5L,
-                ConversionType.XML_TO_JSON,
-                1.2,
-                LocalDateTime.of(2026, 11, 20, 10, 0),
-                null,
-                null,
-                1,
-                1,
-                "{\"a\":null}",
-                null
-        );
-        when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of(cachedDto));
-
-        ConversionService service = new ConversionService(
-                dao,
-                new ObjectMapper(),
-                new ConversionMapper(),
-                new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                cache,
-                "http://localhost:8081",
-                "http://localhost:8082",
-                HttpClient.newHttpClient(),
-                100
-        );
-
-        ConversionResponseDto result = service.convertXml(new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON));
-
-        assertEquals(cachedDto, result);
-        verify(dao, never()).save(any());
-    }
-
-    @Test
-    void enrichesPageFromDbRedisAndParallelS3WithNullOnFailure() throws Exception {
-        Map<String, String> s3Files = new LinkedHashMap<>();
-        s3Files.put("/s3/3-result.xml", "<from-s3/>");
-
-        Conversion fromDb = spyConversion(1L, null, "<db/>");
-        Conversion fromRedis = spyConversion(2L, "2-result.json", null);
-        Conversion fromS3 = spyConversion(3L, "3-result.xml", null);
-        Conversion failedS3 = spyConversion(4L, "missing.xml", null);
-
-        ConversionDao dao = mock(ConversionDao.class);
-        when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(fromDb, fromRedis, fromS3, failedS3));
-
-        ConversionCache cache = mock(ConversionCache.class);
-        when(cache.getResult(2L)).thenReturn(Optional.of("{\"cached\":true}"));
-        when(cache.getResult(3L)).thenReturn(Optional.empty());
-        when(cache.getResult(4L)).thenReturn(Optional.empty());
-
-        HttpServer s3Server = startS3Server(s3Files);
-        try {
-            ConversionService service = new ConversionService(
+        @Test
+        void refreshesTokenAndRetriesWhenConverterReturnsUnauthorized() throws Exception {
+            ConversionService authService = new ConversionService(
                     dao,
                     new ObjectMapper(),
                     new ConversionMapper(),
                     new TransactionTemplate(mock(PlatformTransactionManager.class)),
                     cache,
                     "http://localhost:8081",
-                    "http://localhost:" + s3Server.getAddress().getPort(),
-                    HttpClient.newHttpClient(),
+                    "http://localhost:8082",
+                    httpClient,
+                    "xsltservice",
+                    "secret",
                     100
             );
+            HttpResponse<String> staleTokenResponse = mockResponse(200, "{\"token\":\"stale-token\"}");
+            HttpResponse<String> unauthorizedResponse = mockResponse(401, "");
+            HttpResponse<String> freshTokenResponse = mockResponse(200, "{\"token\":\"fresh-token\"}");
+            HttpResponse<String> okResponse = mockResponse(200, "{\"a\":null}");
+            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(staleTokenResponse)
+                    .thenReturn(unauthorizedResponse)
+                    .thenReturn(freshTokenResponse)
+                    .thenReturn(okResponse);
 
-            List<ConversionResponseDto> page = service.findByFilter(
-                    new ConversionFilterDto(10, 0, null, null, null, null, null, null, null, null, null)
+            ConversionResponseDto result = authService.convertXml(
+                    new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON)
             );
 
-            assertEquals(4, page.size());
-            assertEquals("<db/>", page.get(0).result());
-            assertEquals("{\"cached\":true}", page.get(1).result());
-            assertEquals("<from-s3/>", page.get(2).result());
-            assertNull(page.get(3).result());
-            verify(cache).putResult(3L, "<from-s3/>");
-        } finally {
-            s3Server.stop(0);
+            assertEquals("{\"a\":null}", result.result());
+            verify(httpClient, times(4)).send(any(), any());
+        }
+
+        @Test
+        void throwsWhenRequestIsNull() {
+            assertThrows(IllegalArgumentException.class, () -> service.convertXml(null));
+            verifyNoInteractions(dao, cache, httpClient);
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void throwsWhenXmlContentIsBlank(String xml) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> service.convertXml(new ConversionRequestDto(xml, ConversionType.XML_TO_JSON))
+            );
+            verifyNoInteractions(dao, cache, httpClient);
         }
     }
 
-    private Conversion spyConversion(Long id, String resultFileKey, String resultContent) {
+    @Nested
+    class GetConversion {
+
+        @Test
+        void returnsResultFromDbWhenPresent() throws Exception {
+            Conversion pending = conversion(1L, null, "{\"a\":null}");
+            when(dao.findById(1L)).thenReturn(Optional.of(pending));
+
+            ConversionResponseDto result = service.getConversion(1L);
+
+            assertEquals("{\"a\":null}", result.result());
+            verifyNoInteractions(cache, httpClient);
+        }
+
+        @Test
+        void returnsResultFromRedisWhenCached() throws Exception {
+            Conversion migrated = conversion(2L, "2-result.xml", null);
+            when(dao.findById(2L)).thenReturn(Optional.of(migrated));
+            when(cache.getResult(2L)).thenReturn(Optional.of("<cached/>"));
+
+            ConversionResponseDto result = service.getConversion(2L);
+
+            assertEquals("<cached/>", result.result());
+            verifyNoInteractions(httpClient);
+        }
+
+        @Test
+        void downloadsResultFromS3AndCachesOnMiss() throws Exception {
+            Conversion migrated = conversion(3L, "3-result.xml", null);
+            when(dao.findById(3L)).thenReturn(Optional.of(migrated));
+            when(cache.getResult(3L)).thenReturn(Optional.empty());
+            HttpResponse<String> okResponse = mockResponse(200, "<from-s3/>");
+            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(okResponse);
+
+            ConversionResponseDto result = service.getConversion(3L);
+
+            assertEquals("<from-s3/>", result.result());
+            verify(cache).putResult(3L, "<from-s3/>");
+        }
+
+        @Test
+        void throwsWhenConversionNotFound() {
+            when(dao.findById(99L)).thenReturn(Optional.empty());
+
+            assertThrows(NoSuchElementException.class, () -> service.getConversion(99L));
+        }
+    }
+
+    @Nested
+    class FindByFilter {
+
+        private final ConversionFilterDto validFilter =
+                new ConversionFilterDto(10, 0, null, null, null, null, null, null, null, null, null);
+
+        @Test
+        void returnsEmptyListWhenDaoReturnsEmpty() {
+            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of());
+
+            List<ConversionResponseDto> page = service.findByFilter(validFilter);
+
+            assertTrue(page.isEmpty());
+            verifyNoInteractions(cache, httpClient);
+        }
+
+        @Test
+        void returnsResultFromDbDirectly() {
+            Conversion entry = conversion(1L, null, "<db/>");
+            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
+
+            List<ConversionResponseDto> page = service.findByFilter(validFilter);
+
+            assertEquals("<db/>", page.getFirst().result());
+            verifyNoInteractions(cache, httpClient);
+        }
+
+        @Test
+        void returnsResultFromRedisCacheWithoutS3() {
+            Conversion entry = conversion(2L, "2-result.json", null);
+            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
+            when(cache.getResult(2L)).thenReturn(Optional.of("{\"cached\":true}"));
+
+            List<ConversionResponseDto> page = service.findByFilter(validFilter);
+
+            assertEquals("{\"cached\":true}", page.getFirst().result());
+            verifyNoInteractions(httpClient);
+        }
+
+        @Test
+        void downloadsFromS3AndCachesOnMiss() {
+            Conversion entry = conversion(3L, "3-result.xml", null);
+            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
+            when(cache.getResult(3L)).thenReturn(Optional.empty());
+            HttpResponse<String> okResponse = mockResponse(200, "<from-s3/>");
+            when(httpClient.sendAsync(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(CompletableFuture.completedFuture(okResponse));
+
+            List<ConversionResponseDto> page = service.findByFilter(validFilter);
+
+            assertEquals("<from-s3/>", page.getFirst().result());
+            verify(cache).putResult(3L, "<from-s3/>");
+        }
+
+        @Test
+        void returnsNullResultWhenS3Fails() {
+            Conversion entry = conversion(4L, "missing.xml", null);
+            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
+            when(cache.getResult(4L)).thenReturn(Optional.empty());
+            HttpResponse<String> notFoundResponse = mockResponse(404, "Not found");
+            when(httpClient.sendAsync(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(CompletableFuture.completedFuture(notFoundResponse));
+
+            List<ConversionResponseDto> page = service.findByFilter(validFilter);
+
+            assertNull(page.getFirst().result());
+            verify(cache, never()).putResult(any(), any());
+        }
+
+        @Test
+        void throwsWhenFilterIsNull() {
+            assertThrows(IllegalArgumentException.class, () -> service.findByFilter(null));
+            verifyNoInteractions(dao);
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {0, -1})
+        void throwsWhenLimitIsNotPositive(int limit) {
+            ConversionFilterDto badFilter =
+                    new ConversionFilterDto(limit, 0, null, null, null, null, null, null, null, null, null);
+
+            assertThrows(IllegalArgumentException.class, () -> service.findByFilter(badFilter));
+            verifyNoInteractions(dao);
+        }
+
+        @Test
+        void throwsWhenOffsetIsNegative() {
+            ConversionFilterDto badFilter =
+                    new ConversionFilterDto(10, -1, null, null, null, null, null, null, null, null, null);
+
+            assertThrows(IllegalArgumentException.class, () -> service.findByFilter(badFilter));
+            verifyNoInteractions(dao);
+        }
+    }
+
+    @Nested
+    class MigrateConversionsToS3 {
+
+        @Test
+        void uploadsContentsAndUpdatesKeysInBatch() throws Exception {
+            Conversion pending = conversion(7L, null, "{\"ping\":null}");
+            pending.setSourceContent("<ping/>");
+            when(dao.getConversionsForMigration(100)).thenReturn(List.of(pending));
+            HttpResponse<String> okResponse = mockResponse(200, "ok");
+            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                    .thenReturn(okResponse);
+
+            service.migrateConversionsToS3();
+
+            verify(httpClient, times(2)).send(any(), any());
+            verify(dao).updateConversionsAfterMigration(argThat(items ->
+                    items.size() == 1
+                            && items.getFirst().id().equals(7L)
+                            && items.getFirst().sourceKey().equals("7-source.xml")
+                            && items.getFirst().resultKey().equals("7-result.json")
+            ));
+        }
+
+        @Test
+        void doesNothingWhenNoPendingConversions() {
+            when(dao.getConversionsForMigration(100)).thenReturn(List.of());
+
+            service.migrateConversionsToS3();
+
+            verifyNoInteractions(httpClient);
+            verify(dao, never()).updateConversionsAfterMigration(any());
+        }
+    }
+
+    private static Conversion conversion(Long id, String resultFileKey, String resultContent) {
         Conversion conversion = spy(new Conversion(
-                ConversionType.XML_TO_XML,
+                ConversionType.XML_TO_JSON,
                 2.0,
                 LocalDateTime.of(2026, 11, 20, 11, 0),
                 null,
@@ -290,71 +372,11 @@ class ConversionServiceTest {
         return conversion;
     }
 
-    private ConversionDao mockDao() {
-        ConversionDao dao = mock(ConversionDao.class);
-        when(dao.save(any(Conversion.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        return dao;
-    }
-
-    private ConversionService createService(ConversionDao dao, HttpServer converterServer, HttpServer s3Server) {
-        String converterUrl = converterServer != null
-                ? "http://localhost:" + converterServer.getAddress().getPort()
-                : "http://localhost:8081";
-        ConversionCache cache = mock(ConversionCache.class);
-        when(cache.get(any(), any())).thenReturn(Optional.empty());
-        return new ConversionService(
-                dao,
-                new ObjectMapper(),
-                new ConversionMapper(),
-                new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                cache,
-                converterUrl,
-                "http://localhost:" + s3Server.getAddress().getPort(),
-                HttpClient.newHttpClient(),
-                100
-        );
-    }
-
-    private HttpServer startConverterServer(String expectedType, String responseBody) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/xml2format", exchange -> {
-            assertEquals("POST", exchange.getRequestMethod());
-            assertEquals("type=" + expectedType, exchange.getRequestURI().getQuery());
-            byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream out = exchange.getResponseBody()) {
-                out.write(bytes);
-            }
-        });
-        server.start();
-        return server;
-    }
-
-    private HttpServer startS3Server(Map<String, String> storedFiles) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/s3/", exchange -> {
-            String path = exchange.getRequestURI().getPath();
-            if ("PUT".equals(exchange.getRequestMethod())) {
-                String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-                storedFiles.put(path, body);
-                byte[] keyBytes = path.getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, keyBytes.length);
-                try (OutputStream out = exchange.getResponseBody()) {
-                    out.write(keyBytes);
-                }
-                return;
-            }
-            if ("GET".equals(exchange.getRequestMethod())) {
-                String content = storedFiles.get(path);
-                int status = content != null ? 200 : 404;
-                byte[] body = (content != null ? content : "Not found").getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(status, body.length);
-                try (OutputStream out = exchange.getResponseBody()) {
-                    out.write(body);
-                }
-            }
-        });
-        server.start();
-        return server;
+    @SuppressWarnings("unchecked")
+    private static HttpResponse<String> mockResponse(int status, String body) {
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(status);
+        when(response.body()).thenReturn(body);
+        return response;
     }
 }

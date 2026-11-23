@@ -52,6 +52,7 @@ public class ConversionService {
     private final String xsltconverterUrl;
     private final String s3serviceUrl;
     private final HttpClient httpClient;
+    private final ConverterAuthClient converterAuthClient;
     private final int migrationRowsLimit;
 
     @Autowired
@@ -62,6 +63,8 @@ public class ConversionService {
             TransactionTemplate transactionTemplate,
             ConversionCache conversionCache,
             @Value("${xsltconverter.url}") String xsltconverterUrl,
+            @Value("${xsltconverter.auth.username:}") String converterUsername,
+            @Value("${xsltconverter.auth.password:}") String converterPassword,
             @Value("${s3service.url}") String s3serviceUrl,
             @Value("${migration.rows-limit}") int migrationRowsLimit
     ) {
@@ -74,6 +77,8 @@ public class ConversionService {
                 xsltconverterUrl,
                 s3serviceUrl,
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                converterUsername,
+                converterPassword,
                 migrationRowsLimit
         );
     }
@@ -89,6 +94,34 @@ public class ConversionService {
             HttpClient httpClient,
             int migrationRowsLimit
     ) {
+        this(
+                conversionDao,
+                objectMapper,
+                conversionMapper,
+                transactionTemplate,
+                conversionCache,
+                xsltconverterUrl,
+                s3serviceUrl,
+                httpClient,
+                null,
+                null,
+                migrationRowsLimit
+        );
+    }
+
+    ConversionService(
+            ConversionDao conversionDao,
+            ObjectMapper objectMapper,
+            ConversionMapper conversionMapper,
+            TransactionTemplate transactionTemplate,
+            ConversionCache conversionCache,
+            String xsltconverterUrl,
+            String s3serviceUrl,
+            HttpClient httpClient,
+            String converterUsername,
+            String converterPassword,
+            int migrationRowsLimit
+    ) {
         this.conversionDao = conversionDao;
         this.metricsCalculator = new ConversionMetricsCalculator(objectMapper);
         this.conversionMapper = conversionMapper;
@@ -97,6 +130,9 @@ public class ConversionService {
         this.xsltconverterUrl = stripTrailingSlash(xsltconverterUrl);
         this.s3serviceUrl = stripTrailingSlash(s3serviceUrl);
         this.httpClient = httpClient;
+        this.converterAuthClient = hasText(converterUsername) && hasText(converterPassword)
+                ? new ConverterAuthClient(httpClient, objectMapper, this.xsltconverterUrl, converterUsername, converterPassword)
+                : null;
         this.migrationRowsLimit = migrationRowsLimit;
     }
 
@@ -266,14 +302,33 @@ public class ConversionService {
 
     private String requestConversion(String xmlContent, ConversionType conversionType)
             throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
+        if (converterAuthClient == null) {
+            return sendAndCheck(buildConvertRequest(xmlContent, conversionType, null), "xsltconverter");
+        }
+        String token = converterAuthClient.getToken();
+        HttpResponse<String> response = httpClient.send(
+                buildConvertRequest(xmlContent, conversionType, token),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        if (response.statusCode() == 401) {
+            String refreshedToken = converterAuthClient.forceRefreshToken();
+            response = httpClient.send(
+                    buildConvertRequest(xmlContent, conversionType, refreshedToken),
+                    HttpResponse.BodyHandlers.ofString()
+            );
+        }
+        return extractBodyOrThrow(response, "xsltconverter");
+    }
+
+    private HttpRequest buildConvertRequest(String xmlContent, ConversionType conversionType, String bearerToken) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(xsltconverterUrl + "/xml2format?type=" + conversionType.name()))
                 .header("Content-Type", MediaType.APPLICATION_XML_VALUE)
-                .header("Accept", conversionType.getContentType())
-                .POST(HttpRequest.BodyPublishers.ofString(xmlContent, StandardCharsets.UTF_8))
-                .build();
-
-        return sendAndCheck(request, "xsltconverter");
+                .header("Accept", conversionType.getContentType());
+        if (hasText(bearerToken)) {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+        return builder.POST(HttpRequest.BodyPublishers.ofString(xmlContent, StandardCharsets.UTF_8)).build();
     }
 
     private int countOutputElements(ConversionType conversionType, String resultContent) {
@@ -323,7 +378,7 @@ public class ConversionService {
         return response.body();
     }
 
-    private boolean hasText(String value) {
+    private static boolean hasText(String value) {
         return value != null && !value.isBlank();
     }
 

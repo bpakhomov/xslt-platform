@@ -14,6 +14,8 @@ services:
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=postgres
       - XSLTCONVERTER_URL=http://xsltconverter:8081
+      - CONVERTER_SERVICE_USER=xsltservice
+      - CONVERTER_SERVICE_PASSWORD=xsltservice-secret
       - S3SERVICE_URL=http://s3service:8082
       - MIGRATION_DELAY_MS=60000
       - MIGRATION_ROWS_LIMIT=100
@@ -40,11 +42,20 @@ services:
     ports:
       - "8081:8081"
     environment:
+      - DB_URL=jdbc:postgresql://postgres:5432/converter_users
+      - DB_USER=postgres
+      - DB_PSWD=postgres
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CACHE_TTL_MINUTES=10
       - CACHE_COMPRESS_THRESHOLD_BYTES=4096
+      - JWT_SECRET=local-dev-xsltconverter-jwt-secret-key-2026-change-me
+      - JWT_EXPIRATION_MINUTES=60
+      - CONVERTER_SERVICE_USER=xsltservice
+      - CONVERTER_SERVICE_PASSWORD=xsltservice-secret
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -90,6 +101,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d converterdb"]
       interval: 5s
