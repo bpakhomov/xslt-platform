@@ -168,17 +168,17 @@ public class UserService {
                 .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
     }
 
-    private Optional<User> readFromCache(String username) {
+    Optional<User> readFromCache(String username) {
         return userCache != null ? userCache.get(username) : Optional.empty();
     }
 
-    private void cacheUser(User user) {
+    void cacheUser(User user) {
         if (userCache != null && user != null) {
             userCache.put(user);
         }
     }
 
-    private void evictFromCache(String username) {
+    void evictFromCache(String username) {
         if (userCache != null && hasText(username)) {
             userCache.evict(username);
         }

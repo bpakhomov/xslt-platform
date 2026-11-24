@@ -26,6 +26,7 @@ class UserServiceTest {
 
     private UserDao userDao;
     private UserCache userCache;
+    private TransactionTemplate transactionTemplate;
     private PasswordEncoder passwordEncoder;
     private UserService userService;
 
@@ -33,10 +34,11 @@ class UserServiceTest {
     void setUp() {
         userDao = mock(UserDao.class);
         userCache = mock(UserCache.class);
+        transactionTemplate = new TransactionTemplate(mock(PlatformTransactionManager.class));
         passwordEncoder = new BCryptPasswordEncoder();
         userService = new UserService(
                 userDao,
-                new TransactionTemplate(mock(PlatformTransactionManager.class)),
+                transactionTemplate,
                 passwordEncoder,
                 userCache
         );
@@ -144,6 +146,19 @@ class UserServiceTest {
         }
 
         @Test
+        void loadsFromDatabaseWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+            User user = new User("ivan", "qwerty");
+            when(userDao.findByUsername("ivan")).thenReturn(Optional.of(user));
+
+            Optional<User> found = serviceWithoutCache.findByUsername("ivan");
+
+            assertTrue(found.isPresent());
+            assertEquals("ivan", found.get().getUsername());
+            verify(userDao).findByUsername("ivan");
+        }
+
+        @Test
         void returnsEmptyWhenNotFound() {
             when(userCache.get("missing")).thenReturn(Optional.empty());
             when(userDao.findByUsername("missing")).thenReturn(Optional.empty());
@@ -237,6 +252,20 @@ class UserServiceTest {
             verify(userDao).update(user);
             verify(userCache, never()).evict(any());
             verify(userCache).put(updated);
+        }
+
+        @Test
+        void updatesUsernameWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+            User user = new User("name", "1234");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.existsByUsername("newName")).thenReturn(false);
+            when(userDao.update(user)).thenReturn(user);
+
+            User updated = serviceWithoutCache.updateUsername(1L, "newName");
+
+            assertEquals("newName", updated.getUsername());
+            verify(userDao).update(user);
         }
     }
 
@@ -344,6 +373,32 @@ class UserServiceTest {
             verify(userCache).evict("alice");
         }
 
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void deletesUserWithoutEvictingWhenUsernameIsBlank(String username) {
+            User user = new User(username, "hash");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.deleteById(1L)).thenReturn(true);
+
+            userService.deleteById(1L);
+
+            verify(userDao).deleteById(1L);
+            verifyNoInteractions(userCache);
+        }
+
+        @Test
+        void deletesUserWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+            User user = new User("alice", "hash");
+            when(userDao.findById(1L)).thenReturn(Optional.of(user));
+            when(userDao.deleteById(1L)).thenReturn(true);
+
+            serviceWithoutCache.deleteById(1L);
+
+            verify(userDao).deleteById(1L);
+        }
+
         @Test
         void throwsWhenUserNotFound() {
             when(userDao.findById(1L)).thenReturn(Optional.empty());
@@ -396,6 +451,97 @@ class UserServiceTest {
         void returnsFalseWhenEncodedPasswordIsBlank(String encodedPassword) {
             assertFalse(userService.matchesPassword("secret123", encodedPassword));
             verifyNoInteractions(userDao);
+        }
+    }
+
+    @Nested
+    class ReadFromCache {
+        @Test
+        void returnsCachedUserWhenPresent() {
+            User cached = new User("alice", "hash");
+            when(userCache.get("alice")).thenReturn(Optional.of(cached));
+
+            Optional<User> result = userService.readFromCache("alice");
+
+            assertTrue(result.isPresent());
+            assertEquals("alice", result.get().getUsername());
+            verify(userCache).get("alice");
+        }
+
+        @Test
+        void returnsEmptyWhenCacheMiss() {
+            when(userCache.get("alice")).thenReturn(Optional.empty());
+
+            Optional<User> result = userService.readFromCache("alice");
+
+            assertTrue(result.isEmpty());
+            verify(userCache).get("alice");
+        }
+
+        @Test
+        void returnsEmptyWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+
+            Optional<User> result = serviceWithoutCache.readFromCache("alice");
+
+            assertTrue(result.isEmpty());
+            verifyNoInteractions(userCache);
+        }
+    }
+
+    @Nested
+    class CacheUser {
+        @Test
+        void cachesUserWhenCacheAndUserArePresent() {
+            User user = new User("alice", "hash");
+
+            userService.cacheUser(user);
+
+            verify(userCache).put(user);
+        }
+
+        @Test
+        void doesNothingWhenUserIsNull() {
+            userService.cacheUser(null);
+
+            verifyNoInteractions(userCache);
+        }
+
+        @Test
+        void doesNothingWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+
+            serviceWithoutCache.cacheUser(new User("alice", "hash"));
+
+            verifyNoInteractions(userCache);
+        }
+    }
+
+    @Nested
+    class EvictFromCache {
+        @Test
+        void evictsUserWhenCacheAndUsernameArePresent() {
+            userService.evictFromCache("alice");
+
+            verify(userCache).evict("alice");
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = "   ")
+        void doesNothingWhenUsernameIsBlank(String username) {
+            userService.evictFromCache(username);
+
+            verifyNoInteractions(userCache);
+        }
+
+        @Test
+        void doesNothingWhenCacheIsNull() {
+            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
+
+            serviceWithoutCache.evictFromCache("alice");
+
+            verifyNoInteractions(userCache);
         }
     }
 }

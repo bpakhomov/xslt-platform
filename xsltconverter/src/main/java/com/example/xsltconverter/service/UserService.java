@@ -117,11 +117,11 @@ public class UserService {
                 .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
     }
 
-    private Optional<User> readFromCache(String username) {
+    Optional<User> readFromCache(String username) {
         return userCache != null ? userCache.get(username) : Optional.empty();
     }
 
-    private void cacheUser(User user) {
+    void cacheUser(User user) {
         if (userCache != null && user != null) {
             userCache.put(user);
         }
