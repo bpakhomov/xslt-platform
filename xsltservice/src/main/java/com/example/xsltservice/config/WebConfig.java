@@ -28,10 +28,10 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(rateLimitInterceptor)
+        registry.addInterceptor(auditInterceptor)
                 .excludePathPatterns(EXCLUDED_PATHS)
                 .order(0);
-        registry.addInterceptor(auditInterceptor)
+        registry.addInterceptor(rateLimitInterceptor)
                 .excludePathPatterns(EXCLUDED_PATHS)
                 .order(1);
     }
