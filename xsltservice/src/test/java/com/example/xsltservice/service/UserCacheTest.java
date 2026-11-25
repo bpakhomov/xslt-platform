@@ -1,5 +1,6 @@
 package com.example.xsltservice.service;
 
+import com.example.xsltservice.entity.TariffPlan;
 import com.example.xsltservice.entity.User;
 import com.example.xsltservice.entity.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +42,7 @@ class UserCacheTest {
         @Test
         void returnsUserWhenCached() {
             when(redisClient.get("xsltservice:auth:user:alice"))
-                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"status\":\"ACTIVE\"}");
+                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"status\":\"ACTIVE\",\"tariffPlan\":\"BASIC\"}");
 
             Optional<User> result = userCache.get("alice");
 
@@ -50,24 +51,34 @@ class UserCacheTest {
             assertEquals("alice", result.get().getUsername());
             assertEquals("hashed", result.get().getPassword());
             assertEquals(UserStatus.ACTIVE, result.get().getStatus());
+            assertEquals(TariffPlan.BASIC, result.get().getTariffPlan());
         }
 
         @Test
         void returnsDisabledUserWhenCachedAsDisabled() {
             when(redisClient.get("xsltservice:auth:user:alice"))
-                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"status\":\"DISABLED\"}");
+                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"status\":\"DISABLED\",\"tariffPlan\":\"FREE\"}");
 
             Optional<User> result = userCache.get("alice");
 
             assertTrue(result.isPresent());
             assertEquals(UserStatus.DISABLED, result.get().getStatus());
+            assertEquals(TariffPlan.FREE, result.get().getTariffPlan());
             assertFalse(result.get().isActive());
         }
 
         @Test
         void returnsEmptyWhenPayloadMissingStatus() {
             when(redisClient.get("xsltservice:auth:user:alice"))
-                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\"}");
+                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"tariffPlan\":\"FREE\"}");
+
+            assertTrue(userCache.get("alice").isEmpty());
+        }
+
+        @Test
+        void returnsEmptyWhenPayloadMissingTariffPlan() {
+            when(redisClient.get("xsltservice:auth:user:alice"))
+                    .thenReturn("{\"id\":7,\"username\":\"alice\",\"password\":\"hashed\",\"status\":\"ACTIVE\"}");
 
             assertTrue(userCache.get("alice").isEmpty());
         }
@@ -141,12 +152,23 @@ class UserCacheTest {
             assertEquals("alice", json.path("username").asString());
             assertEquals("hashed", json.path("password").asString());
             assertEquals("ACTIVE", json.path("status").asString());
+            assertEquals("FREE", json.path("tariffPlan").asString());
         }
 
         @Test
         void doesNothingWhenStatusIsNull() {
             User user = new User("alice", "hashed");
             user.setStatus(null);
+
+            userCache.put(user);
+
+            verifyNoInteractions(redisClient);
+        }
+
+        @Test
+        void doesNothingWhenTariffPlanIsNull() {
+            User user = new User("alice", "hashed");
+            user.setTariffPlan(null);
 
             userCache.put(user);
 

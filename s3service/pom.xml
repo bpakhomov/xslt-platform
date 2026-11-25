@@ -12,11 +12,17 @@
 	<artifactId>s3service</artifactId>
 	<version>0.2.0</version>
 	<properties>
+		<bucket4j.version>8.15.0</bucket4j.version>
 		<minio.version>8.5.7</minio.version>
 		<springdoc.version>2.6.0</springdoc.version>
 		<java.version>25</java.version>
 	</properties>
 	<dependencies>
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j_jdk17-core</artifactId>
+			<version>${bucket4j.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>

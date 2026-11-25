@@ -1,5 +1,6 @@
 package com.example.xsltservice.service;
 
+import com.example.xsltservice.entity.TariffPlan;
 import com.example.xsltservice.entity.User;
 import com.example.xsltservice.entity.UserStatus;
 import org.slf4j.Logger;
@@ -78,7 +79,8 @@ public class UserCache {
             return Optional.empty();
         }
         CachedUser cached = objectMapper.readValue(payload, CachedUser.class);
-        if (cached == null || isBlank(cached.username()) || isBlank(cached.password()) || cached.status() == null) {
+        if (cached == null || isBlank(cached.username()) || isBlank(cached.password())
+                || cached.status() == null || cached.tariffPlan() == null) {
             return Optional.empty();
         }
         User user = toUser(cached);
@@ -86,7 +88,13 @@ public class UserCache {
     }
 
     private String serialize(User user) {
-        CachedUser cached = new CachedUser(user.getId(), user.getUsername(), user.getPassword(), user.getStatus());
+        CachedUser cached = new CachedUser(
+                user.getId(),
+                user.getUsername(),
+                user.getPassword(),
+                user.getStatus(),
+                user.getTariffPlan()
+        );
         return objectMapper.writeValueAsString(cached);
     }
 
@@ -94,11 +102,13 @@ public class UserCache {
         User user = new User(cached.username(), cached.password());
         user.setId(cached.id());
         user.setStatus(cached.status());
+        user.setTariffPlan(cached.tariffPlan());
         return user;
     }
 
     private boolean isCacheable(User user) {
-        return user != null && canUseKey(user.getUsername()) && !isBlank(user.getPassword()) && user.getStatus() != null;
+        return user != null && canUseKey(user.getUsername()) && !isBlank(user.getPassword())
+                && user.getStatus() != null && user.getTariffPlan() != null;
     }
 
     private boolean canUseKey(String username) {
@@ -113,6 +123,6 @@ public class UserCache {
         return value == null || value.isBlank();
     }
 
-    private record CachedUser(long id, String username, String password, UserStatus status) {
+    private record CachedUser(long id, String username, String password, UserStatus status, TariffPlan tariffPlan) {
     }
 }

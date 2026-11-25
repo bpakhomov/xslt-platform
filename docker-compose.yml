@@ -16,6 +16,10 @@ services:
       - XSLTCONVERTER_URL=http://xsltconverter:8081
       - CONVERTER_SERVICE_USER=xsltservice
       - CONVERTER_SERVICE_PASSWORD=xsltservice-secret
+      - XSLTCONVERTER_RETRY_MAX_RETRIES=3
+      - XSLTCONVERTER_RETRY_DELAY_MS=1100
+      - XSLTCONVERTER_RETRY_MULTIPLIER=1.5
+      - XSLTCONVERTER_RETRY_MAX_DELAY_MS=3000
       - S3SERVICE_URL=http://s3service:8082
       - MIGRATION_DELAY_MS=60000
       - MIGRATION_ROWS_LIMIT=100
@@ -53,6 +57,7 @@ services:
       - JWT_EXPIRATION_MINUTES=60
       - CONVERTER_SERVICE_USER=xsltservice
       - CONVERTER_SERVICE_PASSWORD=xsltservice-secret
+      - XML2FORMAT_RATE_LIMIT_RPS=1
     depends_on:
       postgres:
         condition: service_healthy

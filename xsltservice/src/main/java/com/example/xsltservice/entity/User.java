@@ -22,6 +22,11 @@ public class User {
     @ColumnDefault("'ACTIVE'")
     private UserStatus status = UserStatus.ACTIVE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tariff_plan", nullable = false, length = 32)
+    @ColumnDefault("'FREE'")
+    private TariffPlan tariffPlan = TariffPlan.FREE;
+
     public User() {
     }
 
@@ -29,6 +34,7 @@ public class User {
         this.username = username;
         this.password = password;
         this.status = UserStatus.ACTIVE;
+        this.tariffPlan = TariffPlan.FREE;
     }
 
     public void setId(long id) {
@@ -61,6 +67,14 @@ public class User {
 
     public void setStatus(UserStatus status) {
         this.status = status;
+    }
+
+    public TariffPlan getTariffPlan() {
+        return tariffPlan;
+    }
+
+    public void setTariffPlan(TariffPlan tariffPlan) {
+        this.tariffPlan = tariffPlan;
     }
 
     public boolean isActive() {

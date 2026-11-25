@@ -27,12 +27,18 @@
 		<url/>
 	</scm>
 	<properties>
+		<bucket4j.version>8.15.0</bucket4j.version>
 		<redis.version>7.4.1</redis.version>
 		<spring.version>7.0.8</spring.version>
 		<springdoc.version>2.6.0</springdoc.version>
 		<java.version>25</java.version>
 	</properties>
 	<dependencies>
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j_jdk17-core</artifactId>
+			<version>${bucket4j.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-jdbc</artifactId>

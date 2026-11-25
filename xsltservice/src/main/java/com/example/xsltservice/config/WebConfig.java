@@ -1,6 +1,7 @@
 package com.example.xsltservice.config;
 
 import com.example.xsltservice.interceptor.AuditInterceptor;
+import com.example.xsltservice.interceptor.RateLimitInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -17,14 +18,21 @@ public class WebConfig implements WebMvcConfigurer {
             "/error"
     };
 
+    private final RateLimitInterceptor rateLimitInterceptor;
     private final AuditInterceptor auditInterceptor;
 
-    public WebConfig(AuditInterceptor auditInterceptor) {
+    public WebConfig(RateLimitInterceptor rateLimitInterceptor, AuditInterceptor auditInterceptor) {
+        this.rateLimitInterceptor = rateLimitInterceptor;
         this.auditInterceptor = auditInterceptor;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(auditInterceptor).excludePathPatterns(EXCLUDED_PATHS);
+        registry.addInterceptor(rateLimitInterceptor)
+                .excludePathPatterns(EXCLUDED_PATHS)
+                .order(0);
+        registry.addInterceptor(auditInterceptor)
+                .excludePathPatterns(EXCLUDED_PATHS)
+                .order(1);
     }
 }
