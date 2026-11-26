@@ -32,8 +32,14 @@
 		<spring.version>7.0.8</spring.version>
 		<springdoc.version>2.6.0</springdoc.version>
 		<java.version>25</java.version>
+		<jsonwebtoken.version>0.13.0</jsonwebtoken.version>
 	</properties>
 	<dependencies>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt</artifactId>
+			<version>${jsonwebtoken.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>com.bucket4j</groupId>
 			<artifactId>bucket4j_jdk17-core</artifactId>

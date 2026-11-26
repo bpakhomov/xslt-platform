@@ -15,15 +15,9 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import tools.jackson.databind.ObjectMapper;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class JwtAuthFilterTest {
 
@@ -36,7 +30,7 @@ class JwtAuthFilterTest {
 
     @BeforeEach
     void setUp() {
-        jwtService = new JwtService(new ObjectMapper(), "test-secret-key-at-least-32-bytes-long", 60);
+        jwtService = new JwtService("test-secret-key-at-least-32-bytes-long", 60);
         userDetailsService = mock(UserDetailsService.class);
         filter = new JwtAuthFilter(jwtService, userDetailsService);
         request = new MockHttpServletRequest();

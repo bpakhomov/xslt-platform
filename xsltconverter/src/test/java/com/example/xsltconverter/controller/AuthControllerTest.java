@@ -12,12 +12,9 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import tools.jackson.databind.ObjectMapper;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,7 +29,7 @@ class AuthControllerTest {
     void setUp() {
         userService = mock(UserService.class);
         authenticationManager = mock(AuthenticationManager.class);
-        JwtService jwtService = new JwtService(new ObjectMapper(), "test-secret-key-at-least-32-bytes-long", 60);
+        JwtService jwtService = new JwtService("test-secret-key-at-least-32-bytes-long", 60);
         mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(userService, authenticationManager, jwtService))
                 .build();
     }

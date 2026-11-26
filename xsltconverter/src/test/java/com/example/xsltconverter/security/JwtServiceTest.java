@@ -6,27 +6,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class JwtServiceTest {
 
     private static final String SECRET = "test-secret-key-at-least-32-bytes-long";
 
-    private ObjectMapper objectMapper;
     private JwtService jwtService;
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
-        jwtService = new JwtService(objectMapper, SECRET, 60);
+        jwtService = new JwtService(SECRET, 60);
     }
 
     @Nested
@@ -36,13 +31,13 @@ class JwtServiceTest {
         @NullAndEmptySource
         @ValueSource(strings = "short")
         void throwsWhenSecretIsInvalid(String secret) {
-            assertThrows(IllegalArgumentException.class, () -> new JwtService(objectMapper, secret, 60));
+            assertThrows(IllegalArgumentException.class, () -> new JwtService(secret, 60));
         }
 
         @ParameterizedTest
         @ValueSource(longs = {0, -5})
         void throwsWhenExpirationIsNotPositive(long minutes) {
-            assertThrows(IllegalArgumentException.class, () -> new JwtService(objectMapper, SECRET, minutes));
+            assertThrows(IllegalArgumentException.class, () -> new JwtService(SECRET, minutes));
         }
     }
 
@@ -88,8 +83,8 @@ class JwtServiceTest {
         @Test
         void returnsEmptyWhenTokenIsExpired() {
             Instant issuedAt = Instant.parse("2026-11-23T10:00:00Z");
-            JwtService issuer = new JwtService(objectMapper, SECRET, 1, Clock.fixed(issuedAt, ZoneOffset.UTC));
-            JwtService validator = new JwtService(objectMapper, SECRET, 1, Clock.fixed(issuedAt.plusSeconds(61), ZoneOffset.UTC));
+            JwtService issuer = new JwtService(SECRET, 1, Clock.fixed(issuedAt, ZoneOffset.UTC));
+            JwtService validator = new JwtService(SECRET, 1, Clock.fixed(issuedAt.plusSeconds(61), ZoneOffset.UTC));
 
             String expiredToken = issuer.generateToken("alice");
 
