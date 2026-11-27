@@ -1,5 +1,6 @@
 package com.example.xsltservice.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import org.hibernate.annotations.ColumnDefault;
 
@@ -77,6 +78,7 @@ public class User {
         this.tariffPlan = tariffPlan;
     }
 
+    @JsonIgnore
     public boolean isActive() {
         return status == UserStatus.ACTIVE;
     }

@@ -44,23 +44,19 @@ import static org.mockito.Mockito.when;
 class ConversionServiceTest {
 
     private ConversionDao dao;
-    private ConversionCache cache;
     private HttpClient httpClient;
     private ConversionService service;
 
     @BeforeEach
     void setUp() {
         dao = mock(ConversionDao.class);
-        cache = mock(ConversionCache.class);
         httpClient = mock(HttpClient.class);
         when(dao.save(any(Conversion.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(cache.get(any(), any())).thenReturn(Optional.empty());
         service = new ConversionService(
                 dao,
                 new ObjectMapper(),
                 new ConversionMapper(),
                 new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                cache,
                 "http://localhost:8081",
                 "http://localhost:8082",
                 httpClient,
@@ -111,30 +107,12 @@ class ConversionServiceTest {
         }
 
         @Test
-        void returnsCachedResponseWithoutCallingConverterOrDb() throws Exception {
-            ConversionResponseDto cachedDto = new ConversionResponseDto(
-                    5L, ConversionType.XML_TO_JSON, 1.2,
-                    LocalDateTime.of(2026, 11, 20, 10, 0),
-                    null, null, 1, 1, "{\"a\":null}", null
-            );
-            when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of(cachedDto));
-
-            ConversionResponseDto result = service.convertXml(
-                    new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON)
-            );
-
-            assertEquals(cachedDto, result);
-            verifyNoInteractions(dao, httpClient);
-        }
-
-        @Test
         void refreshesTokenAndRetriesWhenConverterReturnsUnauthorized() throws Exception {
             ConversionService authService = new ConversionService(
                     dao,
                     new ObjectMapper(),
                     new ConversionMapper(),
                     new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                    cache,
                     "http://localhost:8081",
                     "http://localhost:8082",
                     httpClient,
@@ -163,7 +141,7 @@ class ConversionServiceTest {
         @Test
         void throwsWhenRequestIsNull() {
             assertThrows(IllegalArgumentException.class, () -> service.convertXml(null));
-            verifyNoInteractions(dao, cache, httpClient);
+            verifyNoInteractions(dao, httpClient);
         }
 
         @ParameterizedTest
@@ -174,7 +152,7 @@ class ConversionServiceTest {
                     IllegalArgumentException.class,
                     () -> service.convertXml(new ConversionRequestDto(xml, ConversionType.XML_TO_JSON))
             );
-            verifyNoInteractions(dao, cache, httpClient);
+            verifyNoInteractions(dao, httpClient);
         }
     }
 
@@ -189,26 +167,13 @@ class ConversionServiceTest {
             ConversionResponseDto result = service.getConversion(1L);
 
             assertEquals("{\"a\":null}", result.result());
-            verifyNoInteractions(cache, httpClient);
-        }
-
-        @Test
-        void returnsResultFromRedisWhenCached() throws Exception {
-            Conversion migrated = conversion(2L, "2-result.xml", null);
-            when(dao.findById(2L)).thenReturn(Optional.of(migrated));
-            when(cache.getResult(2L)).thenReturn(Optional.of("<cached/>"));
-
-            ConversionResponseDto result = service.getConversion(2L);
-
-            assertEquals("<cached/>", result.result());
             verifyNoInteractions(httpClient);
         }
 
         @Test
-        void downloadsResultFromS3AndCachesOnMiss() throws Exception {
+        void downloadsResultFromS3WhenNotInDb() throws Exception {
             Conversion migrated = conversion(3L, "3-result.xml", null);
             when(dao.findById(3L)).thenReturn(Optional.of(migrated));
-            when(cache.getResult(3L)).thenReturn(Optional.empty());
             HttpResponse<String> okResponse = mockResponse(200, "<from-s3/>");
             when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
                     .thenReturn(okResponse);
@@ -216,7 +181,6 @@ class ConversionServiceTest {
             ConversionResponseDto result = service.getConversion(3L);
 
             assertEquals("<from-s3/>", result.result());
-            verify(cache).putResult(3L, "<from-s3/>");
         }
 
         @Test
@@ -240,7 +204,7 @@ class ConversionServiceTest {
             List<ConversionResponseDto> page = service.findByFilter(validFilter);
 
             assertTrue(page.isEmpty());
-            verifyNoInteractions(cache, httpClient);
+            verifyNoInteractions(httpClient);
         }
 
         @Test
@@ -251,26 +215,13 @@ class ConversionServiceTest {
             List<ConversionResponseDto> page = service.findByFilter(validFilter);
 
             assertEquals("<db/>", page.getFirst().result());
-            verifyNoInteractions(cache, httpClient);
-        }
-
-        @Test
-        void returnsResultFromRedisCacheWithoutS3() {
-            Conversion entry = conversion(2L, "2-result.json", null);
-            when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
-            when(cache.getResult(2L)).thenReturn(Optional.of("{\"cached\":true}"));
-
-            List<ConversionResponseDto> page = service.findByFilter(validFilter);
-
-            assertEquals("{\"cached\":true}", page.getFirst().result());
             verifyNoInteractions(httpClient);
         }
 
         @Test
-        void downloadsFromS3AndCachesOnMiss() {
+        void downloadsFromS3WhenResultContentMissing() {
             Conversion entry = conversion(3L, "3-result.xml", null);
             when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
-            when(cache.getResult(3L)).thenReturn(Optional.empty());
             HttpResponse<String> okResponse = mockResponse(200, "<from-s3/>");
             when(httpClient.sendAsync(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
                     .thenReturn(CompletableFuture.completedFuture(okResponse));
@@ -278,14 +229,12 @@ class ConversionServiceTest {
             List<ConversionResponseDto> page = service.findByFilter(validFilter);
 
             assertEquals("<from-s3/>", page.getFirst().result());
-            verify(cache).putResult(3L, "<from-s3/>");
         }
 
         @Test
         void returnsNullResultWhenS3Fails() {
             Conversion entry = conversion(4L, "missing.xml", null);
             when(dao.findByFilter(any(ConversionFilter.class))).thenReturn(List.of(entry));
-            when(cache.getResult(4L)).thenReturn(Optional.empty());
             HttpResponse<String> notFoundResponse = mockResponse(404, "Not found");
             when(httpClient.sendAsync(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
                     .thenReturn(CompletableFuture.completedFuture(notFoundResponse));
@@ -293,7 +242,6 @@ class ConversionServiceTest {
             List<ConversionResponseDto> page = service.findByFilter(validFilter);
 
             assertNull(page.getFirst().result());
-            verify(cache, never()).putResult(any(), any());
         }
 
         @Test

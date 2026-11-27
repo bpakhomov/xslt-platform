@@ -26,7 +26,6 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CACHE_TTL_MINUTES=10
-      - CACHE_COMPRESS_THRESHOLD_BYTES=4096
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,7 +51,6 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CACHE_TTL_MINUTES=10
-      - CACHE_COMPRESS_THRESHOLD_BYTES=4096
       - JWT_SECRET=local-dev-xsltconverter-jwt-secret-key-2026-change-me
       - JWT_EXPIRATION_MINUTES=60
       - CONVERTER_SERVICE_USER=xsltservice

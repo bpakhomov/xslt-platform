@@ -26,17 +26,17 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringJUnitConfig(ConverterClientRetryProxyTest.RetryConfig.class)
+@SpringJUnitConfig(RestConverterClientRetryProxyTest.RetryConfig.class)
 @TestPropertySource(properties = {
         "xsltconverter.retry.max-retries=3",
         "xsltconverter.retry.delay-ms=5",
         "xsltconverter.retry.multiplier=1.0",
         "xsltconverter.retry.max-delay-ms=10"
 })
-class ConverterClientRetryProxyTest {
+class RestConverterClientRetryProxyTest {
 
     @Autowired
-    private ConverterClient converterClient;
+    private RestConverterClient restConverterClient;
 
     @Autowired
     private HttpClient httpClient;
@@ -58,7 +58,7 @@ class ConverterClientRetryProxyTest {
                     .thenReturn(tooManyRequests)
                     .thenReturn(okResponse);
 
-            String result = converterClient.convert("<a/>", ConversionType.XML_TO_JSON);
+            String result = restConverterClient.convert("<a/>", ConversionType.XML_TO_JSON);
 
             assertEquals("{\"ok\":true}", result);
             verify(httpClient, times(3)).send(any(), any());
@@ -72,7 +72,7 @@ class ConverterClientRetryProxyTest {
 
             assertThrows(
                     ConverterRetryableException.class,
-                    () -> converterClient.convert("<a/>", ConversionType.XML_TO_JSON)
+                    () -> restConverterClient.convert("<a/>", ConversionType.XML_TO_JSON)
             );
             verify(httpClient, times(4)).send(any(), any());
         }
@@ -85,7 +85,7 @@ class ConverterClientRetryProxyTest {
 
             assertThrows(
                     IllegalStateException.class,
-                    () -> converterClient.convert("<broken>", ConversionType.XML_TO_JSON)
+                    () -> restConverterClient.convert("<broken>", ConversionType.XML_TO_JSON)
             );
             verify(httpClient, times(1)).send(any(), any());
         }
@@ -109,8 +109,8 @@ class ConverterClientRetryProxyTest {
         }
 
         @Bean
-        ConverterClient converterClient(HttpClient httpClient) {
-            return new ConverterClient(httpClient, new ObjectMapper(), "http://localhost:8081", "", "");
+        RestConverterClient converterClient(HttpClient httpClient) {
+            return new RestConverterClient(httpClient, new ObjectMapper(), "http://localhost:8081", "", "");
         }
     }
 }

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -36,7 +37,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @Service
@@ -48,8 +48,7 @@ public class ConversionService {
     private final ConversionMapper conversionMapper;
     private final ConversionMetricsCalculator metricsCalculator;
     private final TransactionTemplate transactionTemplate;
-    private final ConversionCache conversionCache;
-    private final ConverterClient converterClient;
+    private final RestConverterClient restConverterClient;
     private final String s3serviceUrl;
     private final HttpClient httpClient;
     private final int migrationRowsLimit;
@@ -60,8 +59,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            ConversionCache conversionCache,
-            ConverterClient converterClient,
+            RestConverterClient restConverterClient,
             @Value("${s3service.url}") String s3serviceUrl,
             @Value("${migration.rows-limit}") int migrationRowsLimit
     ) {
@@ -70,8 +68,7 @@ public class ConversionService {
                 objectMapper,
                 conversionMapper,
                 transactionTemplate,
-                conversionCache,
-                converterClient,
+                restConverterClient,
                 s3serviceUrl,
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
                 migrationRowsLimit
@@ -83,7 +80,6 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            ConversionCache conversionCache,
             String xsltconverterUrl,
             String s3serviceUrl,
             HttpClient httpClient,
@@ -94,7 +90,6 @@ public class ConversionService {
                 objectMapper,
                 conversionMapper,
                 transactionTemplate,
-                conversionCache,
                 xsltconverterUrl,
                 s3serviceUrl,
                 httpClient,
@@ -109,7 +104,6 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            ConversionCache conversionCache,
             String xsltconverterUrl,
             String s3serviceUrl,
             HttpClient httpClient,
@@ -122,8 +116,7 @@ public class ConversionService {
                 objectMapper,
                 conversionMapper,
                 transactionTemplate,
-                conversionCache,
-                new ConverterClient(httpClient, objectMapper, xsltconverterUrl, converterUsername, converterPassword),
+                new RestConverterClient(httpClient, objectMapper, xsltconverterUrl, converterUsername, converterPassword),
                 s3serviceUrl,
                 httpClient,
                 migrationRowsLimit
@@ -135,8 +128,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            ConversionCache conversionCache,
-            ConverterClient converterClient,
+            RestConverterClient restConverterClient,
             String s3serviceUrl,
             HttpClient httpClient,
             int migrationRowsLimit
@@ -145,8 +137,7 @@ public class ConversionService {
         this.metricsCalculator = new ConversionMetricsCalculator(objectMapper);
         this.conversionMapper = conversionMapper;
         this.transactionTemplate = transactionTemplate;
-        this.conversionCache = conversionCache;
-        this.converterClient = converterClient;
+        this.restConverterClient = restConverterClient;
         this.s3serviceUrl = stripTrailingSlash(s3serviceUrl);
         this.httpClient = httpClient;
         this.migrationRowsLimit = migrationRowsLimit;
@@ -225,6 +216,11 @@ public class ConversionService {
         return convertXml(request, null);
     }
 
+    @Cacheable(
+            value = "conversions",
+            key = "#request.conversionType().name() + ':' + T(org.springframework.util.DigestUtils).md5DigestAsHex(#request.xmlContent().trim().getBytes())",
+            condition = "#request != null && #request.xmlContent() != null && !#request.xmlContent().isBlank() && #request.conversionType() != null"
+    )
     public ConversionResponseDto convertXml(ConversionRequestDto request, User user)
             throws IOException, InterruptedException {
         if (request == null) {
@@ -235,15 +231,11 @@ public class ConversionService {
             throw new IllegalArgumentException("XML content must not be empty");
         }
         ConversionType conversionType = request.conversionType();
-        Optional<ConversionResponseDto> cached = conversionCache.get(xmlContent, conversionType);
-        if (cached.isPresent()) {
-            return cached.get();
-        }
 
         int inputElementsCount = metricsCalculator.countXmlTags(xmlContent);
 
         long start = System.nanoTime();
-        String resultContent = converterClient.convert(xmlContent, conversionType);
+        String resultContent = restConverterClient.convert(xmlContent, conversionType);
         double duration = (System.nanoTime() - start) / 1_000_000.0;
 
         int outputElementsCount = countOutputElements(conversionType, resultContent);
@@ -262,12 +254,7 @@ public class ConversionService {
         );
         Conversion saved = transactionTemplate.execute(_ -> conversionDao.save(conversion));
 
-        ConversionResponseDto response = conversionMapper.toResponseDto(saved, resultContent);
-        conversionCache.put(xmlContent, conversionType, response);
-        if (saved != null) {
-            conversionCache.putResult(saved.getId(), resultContent);
-        }
-        return response;
+        return conversionMapper.toResponseDto(saved, resultContent);
     }
 
     private <T extends Comparable<? super T>> boolean isInvalidRange(T from, T to) {
@@ -284,15 +271,8 @@ public class ConversionService {
         if (!hasText(resultKey)) {
             return CompletableFuture.completedFuture(conversionMapper.toResponseDto(conversion, null));
         }
-        Optional<String> cached = conversionCache.getResult(conversion.getId());
-        if (cached.isPresent()) {
-            return CompletableFuture.completedFuture(conversionMapper.toResponseDto(conversion, cached.get()));
-        }
         return downloadFromS3Async(resultKey)
-                .thenApply(result -> {
-                    conversionCache.putResult(conversion.getId(), result);
-                    return conversionMapper.toResponseDto(conversion, result);
-                })
+                .thenApply(result -> conversionMapper.toResponseDto(conversion, result))
                 .exceptionally(ex -> {
                     log.warn("Failed to load result from S3 for conversion id={}", conversion.getId(), ex);
                     return conversionMapper.toResponseDto(conversion, null);
@@ -307,13 +287,7 @@ public class ConversionService {
         if (!hasText(resultKey)) {
             return null;
         }
-        Optional<String> cached = conversionCache.getResult(conversion.getId());
-        if (cached.isPresent()) {
-            return cached.get();
-        }
-        String result = downloadFromS3(resultKey);
-        conversionCache.putResult(conversion.getId(), result);
-        return result;
+        return downloadFromS3(resultKey);
     }
 
     private int countOutputElements(ConversionType conversionType, String resultContent) {

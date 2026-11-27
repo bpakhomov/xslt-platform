@@ -23,15 +23,15 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class ConverterClientTest {
+class RestConverterClientTest {
 
     private HttpClient httpClient;
-    private ConverterClient client;
+    private RestConverterClient client;
 
     @BeforeEach
     void setUp() {
         httpClient = mock(HttpClient.class);
-        client = new ConverterClient(httpClient, new ObjectMapper(), "http://localhost:8081/", "", "");
+        client = new RestConverterClient(httpClient, new ObjectMapper(), "http://localhost:8081/", "", "");
     }
 
     @Nested
@@ -50,7 +50,7 @@ class ConverterClientTest {
 
         @Test
         void refreshesTokenAndRetriesOnUnauthorized() throws Exception {
-            ConverterClient authClient = new ConverterClient(
+            RestConverterClient authClient = new RestConverterClient(
                     httpClient,
                     new ObjectMapper(),
                     "http://localhost:8081",
