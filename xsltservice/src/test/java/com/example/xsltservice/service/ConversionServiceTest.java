@@ -44,12 +44,14 @@ import static org.mockito.Mockito.when;
 class ConversionServiceTest {
 
     private ConversionDao dao;
+    private ConverterClient converterClient;
     private HttpClient httpClient;
     private ConversionService service;
 
     @BeforeEach
     void setUp() {
         dao = mock(ConversionDao.class);
+        converterClient = mock(ConverterClient.class);
         httpClient = mock(HttpClient.class);
         when(dao.save(any(Conversion.class))).thenAnswer(inv -> inv.getArgument(0));
         service = new ConversionService(
@@ -57,11 +59,9 @@ class ConversionServiceTest {
                 new ObjectMapper(),
                 new ConversionMapper(),
                 new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                "http://localhost:8081",
+                converterClient,
                 "http://localhost:8082",
                 httpClient,
-                null,
-                null,
                 100
         );
     }
@@ -73,9 +73,7 @@ class ConversionServiceTest {
         void convertsXmlToXmlAndSavesToDb() throws Exception {
             String inputXml = "<example><param1>123</param1><inner><param2>456</param2></inner></example>";
             String outputXml = "<example param1=\"123\"><inner param2=\"456\"/></example>";
-            HttpResponse<String> okResponse = mockResponse(200, outputXml);
-            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
-                    .thenReturn(okResponse);
+            when(converterClient.convert(inputXml, ConversionType.XML_TO_XML)).thenReturn(outputXml);
 
             ConversionResponseDto response = service.convertXml(
                     new ConversionRequestDto(inputXml, ConversionType.XML_TO_XML)
@@ -94,9 +92,7 @@ class ConversionServiceTest {
         void defaultsTypeToXmlToJsonWhenOmitted() throws Exception {
             String inputXml = "<user><name>Alice</name></user>";
             String outputJson = "{\"user\":{\"name\":\"Alice\"}}";
-            HttpResponse<String> okResponse = mockResponse(200, outputJson);
-            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
-                    .thenReturn(okResponse);
+            when(converterClient.convert(inputXml, ConversionType.XML_TO_JSON)).thenReturn(outputJson);
 
             ConversionResponseDto response = service.convertXml(new ConversionRequestDto(inputXml, null));
 
@@ -107,41 +103,9 @@ class ConversionServiceTest {
         }
 
         @Test
-        void refreshesTokenAndRetriesWhenConverterReturnsUnauthorized() throws Exception {
-            ConversionService authService = new ConversionService(
-                    dao,
-                    new ObjectMapper(),
-                    new ConversionMapper(),
-                    new TransactionTemplate(mock(PlatformTransactionManager.class)),
-                    "http://localhost:8081",
-                    "http://localhost:8082",
-                    httpClient,
-                    "xsltservice",
-                    "secret",
-                    100
-            );
-            HttpResponse<String> staleTokenResponse = mockResponse(200, "{\"token\":\"stale-token\"}");
-            HttpResponse<String> unauthorizedResponse = mockResponse(401, "");
-            HttpResponse<String> freshTokenResponse = mockResponse(200, "{\"token\":\"fresh-token\"}");
-            HttpResponse<String> okResponse = mockResponse(200, "{\"a\":null}");
-            when(httpClient.send(any(), ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
-                    .thenReturn(staleTokenResponse)
-                    .thenReturn(unauthorizedResponse)
-                    .thenReturn(freshTokenResponse)
-                    .thenReturn(okResponse);
-
-            ConversionResponseDto result = authService.convertXml(
-                    new ConversionRequestDto("<a/>", ConversionType.XML_TO_JSON)
-            );
-
-            assertEquals("{\"a\":null}", result.result());
-            verify(httpClient, times(4)).send(any(), any());
-        }
-
-        @Test
         void throwsWhenRequestIsNull() {
             assertThrows(IllegalArgumentException.class, () -> service.convertXml(null));
-            verifyNoInteractions(dao, httpClient);
+            verifyNoInteractions(dao, converterClient, httpClient);
         }
 
         @ParameterizedTest
@@ -152,7 +116,7 @@ class ConversionServiceTest {
                     IllegalArgumentException.class,
                     () -> service.convertXml(new ConversionRequestDto(xml, ConversionType.XML_TO_JSON))
             );
-            verifyNoInteractions(dao, httpClient);
+            verifyNoInteractions(dao, converterClient, httpClient);
         }
     }
 

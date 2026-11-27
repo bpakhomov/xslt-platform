@@ -48,7 +48,7 @@ public class ConversionService {
     private final ConversionMapper conversionMapper;
     private final ConversionMetricsCalculator metricsCalculator;
     private final TransactionTemplate transactionTemplate;
-    private final RestConverterClient restConverterClient;
+    private final ConverterClient converterClient;
     private final String s3serviceUrl;
     private final HttpClient httpClient;
     private final int migrationRowsLimit;
@@ -59,7 +59,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            RestConverterClient restConverterClient,
+            ConverterClient converterClient,
             @Value("${s3service.url}") String s3serviceUrl,
             @Value("${migration.rows-limit}") int migrationRowsLimit
     ) {
@@ -68,7 +68,7 @@ public class ConversionService {
                 objectMapper,
                 conversionMapper,
                 transactionTemplate,
-                restConverterClient,
+                converterClient,
                 s3serviceUrl,
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
                 migrationRowsLimit
@@ -80,55 +80,7 @@ public class ConversionService {
             ObjectMapper objectMapper,
             ConversionMapper conversionMapper,
             TransactionTemplate transactionTemplate,
-            String xsltconverterUrl,
-            String s3serviceUrl,
-            HttpClient httpClient,
-            int migrationRowsLimit
-    ) {
-        this(
-                conversionDao,
-                objectMapper,
-                conversionMapper,
-                transactionTemplate,
-                xsltconverterUrl,
-                s3serviceUrl,
-                httpClient,
-                null,
-                null,
-                migrationRowsLimit
-        );
-    }
-
-    ConversionService(
-            ConversionDao conversionDao,
-            ObjectMapper objectMapper,
-            ConversionMapper conversionMapper,
-            TransactionTemplate transactionTemplate,
-            String xsltconverterUrl,
-            String s3serviceUrl,
-            HttpClient httpClient,
-            String converterUsername,
-            String converterPassword,
-            int migrationRowsLimit
-    ) {
-        this(
-                conversionDao,
-                objectMapper,
-                conversionMapper,
-                transactionTemplate,
-                new RestConverterClient(httpClient, objectMapper, xsltconverterUrl, converterUsername, converterPassword),
-                s3serviceUrl,
-                httpClient,
-                migrationRowsLimit
-        );
-    }
-
-    private ConversionService(
-            ConversionDao conversionDao,
-            ObjectMapper objectMapper,
-            ConversionMapper conversionMapper,
-            TransactionTemplate transactionTemplate,
-            RestConverterClient restConverterClient,
+            ConverterClient converterClient,
             String s3serviceUrl,
             HttpClient httpClient,
             int migrationRowsLimit
@@ -137,7 +89,7 @@ public class ConversionService {
         this.metricsCalculator = new ConversionMetricsCalculator(objectMapper);
         this.conversionMapper = conversionMapper;
         this.transactionTemplate = transactionTemplate;
-        this.restConverterClient = restConverterClient;
+        this.converterClient = converterClient;
         this.s3serviceUrl = stripTrailingSlash(s3serviceUrl);
         this.httpClient = httpClient;
         this.migrationRowsLimit = migrationRowsLimit;
@@ -235,7 +187,7 @@ public class ConversionService {
         int inputElementsCount = metricsCalculator.countXmlTags(xmlContent);
 
         long start = System.nanoTime();
-        String resultContent = restConverterClient.convert(xmlContent, conversionType);
+        String resultContent = converterClient.convert(xmlContent, conversionType);
         double duration = (System.nanoTime() - start) / 1_000_000.0;
 
         int outputElementsCount = countOutputElements(conversionType, resultContent);
