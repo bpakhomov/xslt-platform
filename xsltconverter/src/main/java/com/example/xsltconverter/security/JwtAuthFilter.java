@@ -1,5 +1,6 @@
 package com.example.xsltconverter.security;
 
+import com.example.xsltconverter.service.IssuedTokenService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Optional;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
@@ -23,10 +25,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+    private final IssuedTokenService issuedTokenService;
 
-    public JwtAuthFilter(JwtService jwtService, UserDetailsService userDetailsService) {
+    public JwtAuthFilter(JwtService jwtService, UserDetailsService userDetailsService, IssuedTokenService issuedTokenService) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.issuedTokenService = issuedTokenService;
     }
 
     @Override
@@ -36,7 +40,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(BEARER_PREFIX)
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
             String token = header.substring(BEARER_PREFIX.length()).trim();
-            jwtService.extractUsername(token).ifPresent(username -> authenticate(username, request));
+            Optional<String> username = jwtService.extractUsername(token);
+            if (username.isPresent() && issuedTokenService.isTokenActive(token)) {
+                authenticate(username.get(), request);
+            }
         }
         filterChain.doFilter(request, response);
     }

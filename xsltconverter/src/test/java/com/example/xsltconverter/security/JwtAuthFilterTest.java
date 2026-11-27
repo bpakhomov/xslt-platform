@@ -2,6 +2,7 @@ package com.example.xsltconverter.security;
 
 import com.example.xsltconverter.entity.User;
 import com.example.xsltconverter.entity.UserStatus;
+import com.example.xsltconverter.service.IssuedTokenService;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,12 +28,14 @@ class JwtAuthFilterTest {
     private MockHttpServletRequest request;
     private MockHttpServletResponse response;
     private FilterChain chain;
+    private IssuedTokenService issuedTokenService;
 
     @BeforeEach
     void setUp() {
         jwtService = new JwtService("test-secret-key-at-least-32-bytes-long", 60);
         userDetailsService = mock(UserDetailsService.class);
-        filter = new JwtAuthFilter(jwtService, userDetailsService);
+        issuedTokenService = mock(IssuedTokenService.class);
+        filter = new JwtAuthFilter(jwtService, userDetailsService, issuedTokenService);
         request = new MockHttpServletRequest();
         response = new MockHttpServletResponse();
         chain = mock(FilterChain.class);
@@ -50,6 +53,7 @@ class JwtAuthFilterTest {
         @Test
         void authenticatesValidBearerToken() throws Exception {
             String token = jwtService.generateToken("alice");
+            when(issuedTokenService.isTokenActive(token)).thenReturn(true);
             when(userDetailsService.loadUserByUsername("alice"))
                     .thenReturn(new AuthUser(new User("alice", "hashed")));
             request.addHeader("Authorization", "Bearer " + token);
@@ -66,6 +70,7 @@ class JwtAuthFilterTest {
             String token = jwtService.generateToken("alice");
             User disabledUser = new User("alice", "hashed");
             disabledUser.setStatus(UserStatus.DISABLED);
+            when(issuedTokenService.isTokenActive(token)).thenReturn(true);
             when(userDetailsService.loadUserByUsername("alice"))
                     .thenReturn(new AuthUser(disabledUser));
             request.addHeader("Authorization", "Bearer " + token);
@@ -79,6 +84,7 @@ class JwtAuthFilterTest {
         @Test
         void leavesContextEmptyWhenUserNotFound() throws Exception {
             String token = jwtService.generateToken("ghost");
+            when(issuedTokenService.isTokenActive(token)).thenReturn(true);
             when(userDetailsService.loadUserByUsername("ghost"))
                     .thenThrow(new UsernameNotFoundException("Missing"));
             request.addHeader("Authorization", "Bearer " + token);
@@ -100,7 +106,7 @@ class JwtAuthFilterTest {
             filter.doFilter(request, response, chain);
 
             assertNull(SecurityContextHolder.getContext().getAuthentication());
-            verifyNoInteractions(userDetailsService);
+            verifyNoInteractions(userDetailsService, issuedTokenService);
             verify(chain).doFilter(request, response);
         }
     }

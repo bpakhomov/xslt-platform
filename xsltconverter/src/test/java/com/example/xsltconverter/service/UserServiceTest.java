@@ -1,6 +1,7 @@
 package com.example.xsltconverter.service;
 
 import com.example.xsltconverter.dao.UserDao;
+import com.example.xsltconverter.entity.IssuedToken;
 import com.example.xsltconverter.entity.User;
 import com.example.xsltconverter.entity.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,30 +25,24 @@ import static org.mockito.Mockito.*;
 class UserServiceTest {
 
     private UserDao userDao;
-    private UserCache userCache;
     private TransactionTemplate transactionTemplate;
     private PasswordEncoder passwordEncoder;
     private UserService userService;
+    private IssuedTokenService issuedTokenService;
 
     @BeforeEach
     void setUp() {
         userDao = mock(UserDao.class);
-        userCache = mock(UserCache.class);
         transactionTemplate = new TransactionTemplate(mock(PlatformTransactionManager.class));
         passwordEncoder = new BCryptPasswordEncoder();
-        userService = new UserService(
-                userDao,
-                transactionTemplate,
-                passwordEncoder,
-                userCache
-        );
+        userService = new UserService(userDao, transactionTemplate, passwordEncoder, issuedTokenService);
     }
 
     @Nested
     class CreateUser {
 
         @Test
-        void hashesPasswordSavesAndCachesUser() {
+        void hashesPasswordAndSavesUser() {
             when(userDao.existsByUsername("alice")).thenReturn(false);
             when(userDao.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -57,7 +52,6 @@ class UserServiceTest {
             assertNotEquals("secret123", created.getPassword());
             assertTrue(passwordEncoder.matches("secret123", created.getPassword()));
             verify(userDao).save(any(User.class));
-            verify(userCache).put(created);
         }
 
         @Test
@@ -66,7 +60,6 @@ class UserServiceTest {
 
             assertThrows(IllegalArgumentException.class, () -> userService.createUser("alice", "secret123"));
             verify(userDao, never()).save(any());
-            verifyNoInteractions(userCache);
         }
 
         @ParameterizedTest
@@ -74,7 +67,7 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void throwsWhenUsernameIsBlank(String username) {
             assertThrows(IllegalArgumentException.class, () -> userService.createUser(username, "secret123"));
-            verifyNoInteractions(userDao, userCache);
+            verifyNoInteractions(userDao);
         }
 
         @ParameterizedTest
@@ -82,7 +75,7 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void throwsWhenPasswordIsBlank(String password) {
             assertThrows(IllegalArgumentException.class, () -> userService.createUser("alice", password));
-            verifyNoInteractions(userDao, userCache);
+            verifyNoInteractions(userDao);
         }
     }
 
@@ -90,14 +83,13 @@ class UserServiceTest {
     class EnsureUserExists {
 
         @Test
-        void createsAndCachesUserWhenMissing() {
+        void createsUserWhenMissing() {
             when(userDao.existsByUsername("xsltservice")).thenReturn(false);
             when(userDao.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
             userService.ensureUserExists("xsltservice", "secret123");
 
             verify(userDao).save(any(User.class));
-            verify(userCache).put(any(User.class));
         }
 
         @Test
@@ -107,7 +99,6 @@ class UserServiceTest {
             userService.ensureUserExists("xsltservice", "secret123");
 
             verify(userDao, never()).save(any());
-            verifyNoInteractions(userCache);
         }
 
         @ParameterizedTest
@@ -116,7 +107,7 @@ class UserServiceTest {
         void ignoresBlankUsername(String username) {
             userService.ensureUserExists(username, "secret123");
 
-            verifyNoInteractions(userDao, userCache);
+            verifyNoInteractions(userDao);
         }
 
         @ParameterizedTest
@@ -125,7 +116,7 @@ class UserServiceTest {
         void ignoresBlankPassword(String password) {
             userService.ensureUserExists("xsltservice", password);
 
-            verifyNoInteractions(userDao, userCache);
+            verifyNoInteractions(userDao);
         }
     }
 
@@ -133,55 +124,24 @@ class UserServiceTest {
     class FindByUsername {
 
         @Test
-        void returnsCachedUserWithoutDatabaseLookup() {
-            User cached = new User("alice", "hashed");
-            cached.setId(5L);
-            when(userCache.get("alice")).thenReturn(Optional.of(cached));
+        void loadsFromDatabaseWhenFound() {
+            User dbUser = new User("alice", "hashed");
+            dbUser.setId(5L);
+            when(userDao.findByUsername("alice")).thenReturn(Optional.of(dbUser));
 
             Optional<User> found = userService.findByUsername("alice");
 
             assertTrue(found.isPresent());
             assertEquals(5L, found.get().getId());
             assertEquals("alice", found.get().getUsername());
-            verifyNoInteractions(userDao);
-            verify(userCache, never()).put(any());
-        }
-
-        @Test
-        void loadsFromDatabaseAndCachesOnCacheMiss() {
-            User dbUser = new User("alice", "hashed");
-            dbUser.setId(5L);
-            when(userCache.get("alice")).thenReturn(Optional.empty());
-            when(userDao.findByUsername("alice")).thenReturn(Optional.of(dbUser));
-
-            Optional<User> found = userService.findByUsername("alice");
-
-            assertTrue(found.isPresent());
-            assertEquals(5L, found.get().getId());
-            verify(userCache).put(dbUser);
-        }
-
-        @Test
-        void loadsFromDatabaseWhenCacheIsNull() {
-            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
-            User dbUser = new User("alice", "hashed");
-            dbUser.setId(5L);
-            when(userDao.findByUsername("alice")).thenReturn(Optional.of(dbUser));
-
-            Optional<User> found = serviceWithoutCache.findByUsername("alice");
-
-            assertTrue(found.isPresent());
-            assertEquals(5L, found.get().getId());
             verify(userDao).findByUsername("alice");
         }
 
         @Test
-        void returnsEmptyWhenNotFoundAnywhere() {
-            when(userCache.get("missing")).thenReturn(Optional.empty());
+        void returnsEmptyWhenNotFound() {
             when(userDao.findByUsername("missing")).thenReturn(Optional.empty());
 
             assertTrue(userService.findByUsername("missing").isEmpty());
-            verify(userCache, never()).put(any());
         }
 
         @ParameterizedTest
@@ -189,7 +149,7 @@ class UserServiceTest {
         @ValueSource(strings = "   ")
         void returnsEmptyWhenUsernameIsBlank(String username) {
             assertTrue(userService.findByUsername(username).isEmpty());
-            verifyNoInteractions(userDao, userCache);
+            verifyNoInteractions(userDao);
         }
     }
 
@@ -197,7 +157,7 @@ class UserServiceTest {
     class DeactivateById {
 
         @Test
-        void deactivatesUserAndOverwritesCache() {
+        void deactivatesUser() {
             User user = new User("alice", "hashed");
             user.setId(1L);
             when(userDao.findById(1L)).thenReturn(Optional.of(user));
@@ -208,7 +168,6 @@ class UserServiceTest {
             assertEquals(UserStatus.DISABLED, result.getStatus());
             assertFalse(result.isActive());
             verify(userDao).update(user);
-            verify(userCache).put(result);
         }
 
         @Test
@@ -217,7 +176,6 @@ class UserServiceTest {
 
             assertThrows(NoSuchElementException.class, () -> userService.deactivateById(1L));
             verify(userDao, never()).update(any());
-            verifyNoInteractions(userCache);
         }
     }
 
@@ -225,7 +183,7 @@ class UserServiceTest {
     class ActivateById {
 
         @Test
-        void activatesUserAndOverwritesCache() {
+        void activatesUser() {
             User user = new User("alice", "hashed");
             user.setId(1L);
             user.setStatus(UserStatus.DISABLED);
@@ -237,7 +195,6 @@ class UserServiceTest {
             assertEquals(UserStatus.ACTIVE, result.getStatus());
             assertTrue(result.isActive());
             verify(userDao).update(user);
-            verify(userCache).put(result);
         }
 
         @Test
@@ -246,72 +203,6 @@ class UserServiceTest {
 
             assertThrows(NoSuchElementException.class, () -> userService.activateById(1L));
             verify(userDao, never()).update(any());
-            verifyNoInteractions(userCache);
-        }
-    }
-
-    @Nested
-    class ReadFromCache {
-
-        @Test
-        void returnsCachedUserWhenPresent() {
-            User cached = new User("alice", "hashed");
-            when(userCache.get("alice")).thenReturn(Optional.of(cached));
-
-            Optional<User> result = userService.readFromCache("alice");
-
-            assertTrue(result.isPresent());
-            assertEquals("alice", result.get().getUsername());
-            verify(userCache).get("alice");
-        }
-
-        @Test
-        void returnsEmptyWhenCacheMiss() {
-            when(userCache.get("alice")).thenReturn(Optional.empty());
-
-            Optional<User> result = userService.readFromCache("alice");
-
-            assertTrue(result.isEmpty());
-            verify(userCache).get("alice");
-        }
-
-        @Test
-        void returnsEmptyWhenCacheIsNull() {
-            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
-
-            Optional<User> result = serviceWithoutCache.readFromCache("alice");
-
-            assertTrue(result.isEmpty());
-            verifyNoInteractions(userCache);
-        }
-    }
-
-    @Nested
-    class CacheUser {
-
-        @Test
-        void cachesUserWhenCacheAndUserArePresent() {
-            User user = new User("alice", "hashed");
-
-            userService.cacheUser(user);
-
-            verify(userCache).put(user);
-        }
-
-        @Test
-        void doesNothingWhenUserIsNull() {
-            userService.cacheUser(null);
-
-            verifyNoInteractions(userCache);
-        }
-
-        @Test
-        void doesNothingWhenCacheIsNull() {
-            UserService serviceWithoutCache = new UserService(userDao, transactionTemplate, passwordEncoder);
-
-            serviceWithoutCache.cacheUser(new User("alice", "hashed"));
-
-            verifyNoInteractions(userCache);
         }
     }
 }

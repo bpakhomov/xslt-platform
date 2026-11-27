@@ -1,21 +1,19 @@
 package com.example.xsltconverter.service;
 
 import com.example.xsltconverter.exception.XmlConversionException;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @Service
 public class XmlConversionDispatcher {
 
     private final Map<ConversionType, XmlConverter> converters = new EnumMap<>(ConversionType.class);
-    private final ConversionResultCache cache;
 
-    public XmlConversionDispatcher(List<XmlConverter> converterList, ConversionResultCache cache) {
-        this.cache = cache;
+    public XmlConversionDispatcher(List<XmlConverter> converterList) {
         for (XmlConverter converter : converterList) {
             XmlConverter existing = converters.put(converter.getType(), converter);
             if (existing != null) {
@@ -24,6 +22,11 @@ public class XmlConversionDispatcher {
         }
     }
 
+    @Cacheable(
+            value = "conversions",
+            key = "#type.name() + ':' + T(org.springframework.util.DigestUtils).md5DigestAsHex(#xmlContent.trim().getBytes())",
+            condition = "#xmlContent != null && !#xmlContent.isBlank() && #type != null"
+    )
     public String convert(String xmlContent, ConversionType type) {
         if (type == null) {
             throw new XmlConversionException("Conversion type must not be null");
@@ -36,13 +39,6 @@ public class XmlConversionDispatcher {
             throw new XmlConversionException("XML content must not be empty");
         }
 
-        Optional<String> cached = cache.get(xmlContent, type);
-        if (cached.isPresent()) {
-            return cached.get();
-        }
-
-        String result = converter.convert(xmlContent);
-        cache.put(xmlContent, type, result);
-        return result;
+        return converter.convert(xmlContent);
     }
 }

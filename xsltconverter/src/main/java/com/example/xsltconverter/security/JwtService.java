@@ -49,16 +49,22 @@ public class JwtService {
     }
 
     public String generateToken(String username) {
+        return generateTokenInfo(username).token();
+    }
+
+    public GeneratedToken generateTokenInfo(String username) {
         if (username == null || username.isBlank()) {
-            throw new IllegalArgumentException("Username must be not null");
+            throw new IllegalArgumentException("Username must not be blank");
         }
-        Instant now = clock.instant();
-        return Jwts.builder()
+        Instant issuedAt = clock.instant();
+        Instant expiresAt = issuedAt.plusSeconds(expirationSeconds);
+        String token = Jwts.builder()
                 .subject(username)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(expirationSeconds)))
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiresAt))
                 .signWith(secretKey, Jwts.SIG.HS256)
                 .compact();
+        return new GeneratedToken(token, issuedAt, expiresAt);
     }
 
     public Optional<String> extractUsername(String token) {
@@ -69,5 +75,8 @@ public class JwtService {
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }
+    }
+
+    public record GeneratedToken(String token, Instant issuedAt, Instant expiresAt) {
     }
 }

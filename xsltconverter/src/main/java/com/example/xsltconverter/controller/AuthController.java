@@ -4,7 +4,9 @@ import com.example.xsltconverter.dto.AuthRequestDto;
 import com.example.xsltconverter.dto.AuthTokenResponseDto;
 import com.example.xsltconverter.dto.UserResponseDto;
 import com.example.xsltconverter.entity.User;
+import com.example.xsltconverter.security.AuthUser;
 import com.example.xsltconverter.security.JwtService;
+import com.example.xsltconverter.service.IssuedTokenService;
 import com.example.xsltconverter.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -18,11 +20,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/auth")
@@ -30,16 +28,16 @@ public class AuthController {
 
     private final UserService userService;
     private final AuthenticationManager authenticationManager;
-    private final JwtService jwtService;
+    private final IssuedTokenService issuedTokenService;
 
     public AuthController(
             UserService userService,
             AuthenticationManager authenticationManager,
-            JwtService jwtService
+            IssuedTokenService issuedTokenService
     ) {
         this.userService = userService;
         this.authenticationManager = authenticationManager;
-        this.jwtService = jwtService;
+        this.issuedTokenService = issuedTokenService;
     }
 
     @PostMapping(value = "/register", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -69,7 +67,9 @@ public class AuthController {
         Authentication auth = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.username(), request.password())
         );
-        return ResponseEntity.ok(new AuthTokenResponseDto(jwtService.generateToken(auth.getName())));
+        User user = ((AuthUser) auth.getPrincipal()).getUser();
+        String token = issuedTokenService.issueToken(user);
+        return ResponseEntity.ok(new AuthTokenResponseDto(token));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

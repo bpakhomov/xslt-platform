@@ -9,7 +9,6 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,14 +16,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class XmlConversionDispatcherTest {
 
     private XmlConverter jsonConverter;
     private XmlConverter xmlConverter;
-    private ConversionResultCache cache;
     private XmlConversionDispatcher dispatcher;
 
     @BeforeEach
@@ -33,46 +30,48 @@ class XmlConversionDispatcherTest {
         when(jsonConverter.getType()).thenReturn(ConversionType.XML_TO_JSON);
         xmlConverter = mock(XmlConverter.class);
         when(xmlConverter.getType()).thenReturn(ConversionType.XML_TO_XML);
-        cache = mock(ConversionResultCache.class);
-        dispatcher = new XmlConversionDispatcher(List.of(jsonConverter, xmlConverter), cache);
+        dispatcher = new XmlConversionDispatcher(List.of(jsonConverter, xmlConverter));
     }
 
     @Nested
     class Convert {
 
         @Test
-        void returnsCachedValueWithoutCallingConverter() {
-            when(cache.get("<a/>", ConversionType.XML_TO_JSON)).thenReturn(Optional.of("{\"a\":null}"));
+        void delegatesToMatchingConverterForXmlToJson() {
+            when(jsonConverter.convert("<a/>")).thenReturn("{\"a\":null}");
 
             String result = dispatcher.convert("<a/>", ConversionType.XML_TO_JSON);
 
             assertEquals("{\"a\":null}", result);
-            verify(jsonConverter, never()).convert(anyString());
+            verify(jsonConverter).convert("<a/>");
+            verify(xmlConverter, never()).convert(anyString());
         }
 
         @Test
-        void convertsAndCachesWhenCacheMisses() {
-            when(cache.get("<a/>", ConversionType.XML_TO_XML)).thenReturn(Optional.empty());
+        void delegatesToMatchingConverterForXmlToXml() {
             when(xmlConverter.convert("<a/>")).thenReturn("<a/>");
 
             String result = dispatcher.convert("<a/>", ConversionType.XML_TO_XML);
 
             assertEquals("<a/>", result);
-            verify(cache).put("<a/>", ConversionType.XML_TO_XML, "<a/>");
+            verify(xmlConverter).convert("<a/>");
+            verify(jsonConverter, never()).convert(anyString());
         }
 
         @ParameterizedTest
         @NullAndEmptySource
         @ValueSource(strings = "   ")
-        void throwsAndSkipsCacheWhenInputIsBlank(String xml) {
+        void throwsWhenInputIsBlank(String xml) {
             assertThrows(XmlConversionException.class, () -> dispatcher.convert(xml, ConversionType.XML_TO_JSON));
-            verifyNoInteractions(cache);
+            verify(jsonConverter, never()).convert(anyString());
+            verify(xmlConverter, never()).convert(anyString());
         }
 
         @Test
         void throwsWhenTypeIsNull() {
             assertThrows(XmlConversionException.class, () -> dispatcher.convert("<a/>", null));
-            verifyNoInteractions(cache);
+            verify(jsonConverter, never()).convert(anyString());
+            verify(xmlConverter, never()).convert(anyString());
         }
     }
 }

@@ -1,7 +1,8 @@
 package com.example.xsltconverter.controller;
 
 import com.example.xsltconverter.entity.User;
-import com.example.xsltconverter.security.JwtService;
+import com.example.xsltconverter.security.AuthUser;
+import com.example.xsltconverter.service.IssuedTokenService;
 import com.example.xsltconverter.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -24,13 +25,14 @@ class AuthControllerTest {
     private UserService userService;
     private AuthenticationManager authenticationManager;
     private MockMvc mockMvc;
+    private IssuedTokenService issuedTokenService;
 
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
         authenticationManager = mock(AuthenticationManager.class);
-        JwtService jwtService = new JwtService("test-secret-key-at-least-32-bytes-long", 60);
-        mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(userService, authenticationManager, jwtService))
+        issuedTokenService = mock(IssuedTokenService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(userService, authenticationManager, issuedTokenService))
                 .build();
     }
 
@@ -80,14 +82,16 @@ class AuthControllerTest {
 
         @Test
         void logsInAndReturnsJwtToken() throws Exception {
+            User user = new User("alice", "$2a$10$hash");
             when(authenticationManager.authenticate(any()))
-                    .thenReturn(new UsernamePasswordAuthenticationToken("alice", null));
+                    .thenReturn(new UsernamePasswordAuthenticationToken(new AuthUser(user), null));
+            when(issuedTokenService.issueToken(user)).thenReturn("jwt-token");
 
             mockMvc.perform(post("/auth/login")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"username\":\"alice\",\"password\":\"secret\"}"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.token").isNotEmpty());
+                    .andExpect(jsonPath("$.token").value("jwt-token"));
         }
 
         @Test
